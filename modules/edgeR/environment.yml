@@ -1,0 +1,8 @@
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - conda-forge::r-base
+  - conda-forge::r-gtools=3.9.5
+  - bioconda::bioconductor-edgeR
+  - bioconda::bioconductor-tximport

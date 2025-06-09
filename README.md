@@ -106,7 +106,7 @@ export NXF_HOME=.nextflow/
 
 nextflow pull andreyhgl/transcriptome-analysis
 
-nextflow run andreyhgl/transcriptome-analysis -r dev \
+nextflow run andreyhgl/transcriptome-analysis \
   --metadata 'metadata.csv' \
   --quant_files 'path-to-quant-files' \
   --generation "F0,F1,F2" \
