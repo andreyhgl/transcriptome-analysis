@@ -71,7 +71,7 @@ Experimental design:
 
 ## Reproducibility
 
-For reproducibility this pipeline uses two singularity containers, which can be downloaded from the [Cloud Library](https://cloud.sylabs.io/library). The `RNAseq` holds most of the R-packages used in the analysis, while `gene-ontology` holds gene ontology related R-packages
+For reproducibility this pipeline uses two singularity containers, which can be downloaded from the [Cloud Library](https://cloud.sylabs.io/library). The `RNAseq` container holds most of the R-packages used in the analysis, while `gene-ontology` container holds gene ontology related R-packages
 
 ```sh
 # apptainer (instead of singulartiy) also works
@@ -102,7 +102,9 @@ $ Rscript <scriptfile>
 ## Run the pipeline
 
 ```sh
-export NXF_HOME=.nextflow/
+#!/bin/bash -l
+
+export NXF_HOME=".nextflow/"
 
 nextflow pull andreyhgl/transcriptome-analysis
 
