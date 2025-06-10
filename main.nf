@@ -34,7 +34,7 @@ workflow {
 
   ch_ensembl_dataset  = ENSEMBL.out.ENSEMBL_DATASET
 
-  ch_quant_files      = Channel.fromPath(params.quant_files)
+  ch_quantfiles       = Channel.fromPath( "${params.quant_path}/**/quant.sf" )
   ch_metadata         = Channel.fromPath(params.metadata)
   ch_tx2gene          = Channel.fromPath(params.tx2gene)
   ch_generation       = Channel.of( params.generation.split(',') )
@@ -42,7 +42,7 @@ workflow {
 
   EDGER (
     ch_metadata,
-    ch_quant_files,
+    ch_quantfiles,
     ch_tx2gene
   )
 
