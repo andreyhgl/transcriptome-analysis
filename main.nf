@@ -8,6 +8,7 @@
 //include { PCA_PLOTS           } from './modules/pca_plots.nf'
 include { ENSEMBL         } from './modules/ensembl/main'
 include { EDGER           } from './modules/edgeR/main'
+include { DIFF_EXPRESSION } from './modules/diff_expression/main'
 //include { LONGTABLE       } from './modules/longtable.nf'
 //include { DMG_TABLE           } from './modules/diffmeth_tables.nf'
 //include { GENE_ONTOLOGY       } from './modules/gene_ontology.nf'
@@ -44,6 +45,11 @@ workflow {
     ch_metadata,
     ch_quantfiles,
     ch_tx2gene
+  )
+
+  DIFF_EXPRESSION (
+    EDGER.out.collect(),
+    ch_ensembl_dataset
   )
 
 /*
