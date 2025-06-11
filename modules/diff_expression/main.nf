@@ -1,5 +1,5 @@
 process DIFF_EXPRESSION {
-  tag 
+  //tag 
   //label
 
   conda "${moduleDir}/environment.yml"

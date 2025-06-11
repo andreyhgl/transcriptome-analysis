@@ -1,5 +1,5 @@
 process EDGER {
-  tag 
+  //tag 
   //label
 
   conda "${moduleDir}/environment.yml"
