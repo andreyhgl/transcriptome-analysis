@@ -11,6 +11,7 @@ process DIFF_EXPRESSION {
 
   input:
   path DGEList
+  path ensembl
 
   output:
   path 'DGE_table.csv', emit: DGE_table
