@@ -35,9 +35,7 @@ workflow {
 
   ch_ensembl_dataset  = ENSEMBL.out.ENSEMBL_DATASET
 
-  ch_quantfiles       = Channel
-                          .fromPath( "${params.quant_path}/**/quant.sf" )
-                          .collect()
+  ch_quantfiles       = Channel.fromPath(params.quant_path})
   ch_metadata         = Channel.fromPath(params.metadata)
   ch_tx2gene          = Channel.fromPath(params.tx2gene)
   ch_generation       = Channel.of( params.generation.split(',') )
