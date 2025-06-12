@@ -41,16 +41,16 @@ workflow {
   ch_generation       = Channel.of( params.generation.split(',') )
   ch_treatment        = Channel.of( params.treatment.split(',') )
 
-  ch_quantfiles.view()
-
   EDGER (
     ch_metadata,
     ch_quantfiles,
     ch_tx2gene
   )
 
+  ch_DGEList          = EDGER.out.DGEList
+
   DIFF_EXPRESSION (
-    EDGER.out.collect(),
+    ch_DGEList,
     ch_ensembl_dataset
   )
 

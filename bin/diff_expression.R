@@ -97,7 +97,7 @@ pull_genes <- function(gene){
 
 # Import datasets
 DGE <- readRDS("DGEList.Rds")
-ens <- read.csv("ensembl-dataset.csv.gz")
+ens <- read.csv("ensembl_dataset.csv.gz")
 
 # Extract generatations
 generations <- names(DGE)
@@ -126,7 +126,7 @@ genexp <- lapply(genes, pull_genes)
 genexp <- Reduce(function(x,y) rbind(x,y), genexp)
 rownames(genexp) <- NULL
 
-filename <- "genexp-table.csv"
+filename <- "DGE_table.csv"
 
 # save genexp table
 write.csv(
