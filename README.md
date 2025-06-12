@@ -109,8 +109,8 @@ export NXF_HOME=".nextflow/"
 nextflow pull andreyhgl/transcriptome-analysis
 
 nextflow run andreyhgl/transcriptome-analysis \
-  --metadata 'path-to-metadata.csv' \
   --quant_path 'path-to-quant-files' \
+  --metadata 'path-to-metadata.csv' \
   --tx2gene 'path-to-tx2gene.tsv' \
   --generation "F0,F1,F2" \
   --treatment "10,100" \
