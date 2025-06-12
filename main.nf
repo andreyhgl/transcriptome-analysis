@@ -41,6 +41,8 @@ workflow {
   ch_generation       = Channel.of( params.generation.split(',') )
   ch_treatment        = Channel.of( params.treatment.split(',') )
 
+  ch_quantfiles.view()
+
   EDGER (
     ch_metadata,
     ch_quantfiles,
