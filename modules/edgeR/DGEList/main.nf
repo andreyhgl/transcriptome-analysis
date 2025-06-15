@@ -1,4 +1,4 @@
-process EDGER {
+process EDGER_DGELIST {
   //tag 
   //label
 
@@ -18,6 +18,6 @@ process EDGER {
   path '*.Rds', emit: DGEList
 
   """
-  edgeR.R
+  edgeR_DGEList.R
   """
 }

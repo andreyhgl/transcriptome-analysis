@@ -7,7 +7,8 @@
 // ~~ Import processes ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ *
 //include { PCA_PLOTS           } from './modules/pca_plots.nf'
 include { ENSEMBL         } from './modules/ensembl/main'
-include { EDGER           } from './modules/edgeR/main'
+include { EDGER_DGELIST   } from './modules/edgeR/DGEList/main'
+include { EDGER_QC_PLOTS  } from './modules/edgeR/QC_plots/main'
 include { DIFF_EXPRESSION } from './modules/diff_expression/main'
 //include { LONGTABLE       } from './modules/longtable.nf'
 //include { DMG_TABLE           } from './modules/diffmeth_tables.nf'
@@ -41,13 +42,17 @@ workflow {
   ch_generation       = Channel.of( params.generation.split(',') )
   ch_treatment        = Channel.of( params.treatment.split(',') )
 
-  EDGER (
+  EDGER_DGELIST (
     ch_metadata,
     ch_quantfiles,
     ch_tx2gene
   )
 
-  ch_DGEList          = EDGER.out.DGEList
+  ch_DGEList          = EDGER_DGELIST.out.DGEList
+
+  EDGER_QC_PLOTS (
+    ch_DGEList
+  )
 
   DIFF_EXPRESSION (
     ch_DGEList,
@@ -55,18 +60,16 @@ workflow {
   )
 
 /*
-
   LONGTABLE (
-    EDGER.out.DGEList.collect(),
+    ch_DGEList,
     ch_ensembl_dataset
   )
 
-  PCA_PLOTS (
-    ch_metadata,
-    ch_coverage_files,
-    generations,
-    treatments
-  )
+
+
+
+
+
 
   DMR_TABLE (
     METHYLKIT.out.collect(),
