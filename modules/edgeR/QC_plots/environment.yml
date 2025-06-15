@@ -1,0 +1,14 @@
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - conda-forge::r-base
+  - conda-forge::r-scales=1.4.0
+  - conda-forge::r-ggplot2=3.5.2
+  - conda-forge::r-ggrepel=0.9.6
+  - conda-forge::r-forcats=1.0.0
+  - conda-forge::r-rcolorbrewer=1.1_2
+  - conda-forge::r-cowplot=1.1.3
+  - bioconda::bioconductor-edgeR
+  - bioconda::bioconductor-tximport
+  - bioconda::bioconductor-complexheatmap=2.22.0
