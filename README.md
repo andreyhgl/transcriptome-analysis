@@ -77,8 +77,8 @@ For reproducibility this pipeline uses two singularity containers, which can be 
 ```sh
 # apptainer (instead of singulartiy) also works
 
-IMAGE1='library://andreyhgl/singularity-r/rnaseq:latest'
-IMAGE2='library://andreyhgl/singularity-r/gene-ontology:latest'
+IMAGE1='library://andreyhgl/singularity-r/rnaseq'
+IMAGE2='library://andreyhgl/singularity-r/gene-ontology'
 
 singularity pull ${IMAGE1}
 singularity pull ${IMAGE2}
