@@ -36,8 +36,9 @@ This repository holds a nextflow pipeline for analysing gene expression studies.
 
 The nextflow pipeline produce the following:
 
-+ PCA plots (for sanity check of experiment)
++ Ensembl database table containing gene annotations
 + DGEList object
++ Quality control plots: PCA, distance plots
 + Differentially expressed genes table
 + Gene ontology analysis
 + Supplementary files (plots, excel-tables)
@@ -47,7 +48,7 @@ The nextflow pipeline produce the following:
 
 ### Metadata
 
-Setup the `data/metadata.csv` to look like the following:
+Setup the `metadata.csv` to look like the following:
 
 ```csv
 gen,id,treatment,...
