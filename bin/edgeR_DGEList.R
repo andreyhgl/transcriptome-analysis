@@ -16,16 +16,26 @@ suppressPackageStartupMessages({
 # ~~ Functions ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 DE_analysis <- function(gen, meta, tx2gene, files){
+	#gen="F0"
 	metadata <- meta[meta$gen %in% gen, ]
 	metadata$treatment <- factor(metadata$treatment)
-	design <- model.matrix(~ treatment, data = metadata)
+	
+	# quick-fix for second variable
+	if (length(unique(metadata$diet)) > 1){
+		metadata$diet <- factor(metadata$diet)
+		mod <- as.formula(~ treatment * diet)
+	} else {
+		mod <- as.formula(~ treatment)
+	}
+	design <- model.matrix(mod, data = metadata)
 
-	cat(paste(
+	cat(
 		"\n~~ processing files ~~~~~~~~~~~~~~~~~~~~~~~~~\n",
 		"Generation:\t", gen, "\n",
-		"Num. samples:\t", nrow(metadata),
+		"Num. samples:\t", nrow(metadata), "\n",
+		"Design:\t", paste(mod),
 		"\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n"
-	))
+	)
 
 	files_sub <- files[names(files) %in% metadata$id]
 	txi <- tximport(files_sub, "salmon", tx2gene = tx2gene)
@@ -50,7 +60,7 @@ DE_analysis <- function(gen, meta, tx2gene, files){
 	normMat <- log(normMat)
 
 	# Creating a DGEList object for use in edgeR.
-	y <- DGEList(cts, group = metadata$treatment)
+	y <- DGEList(cts)
 	y <- scaleOffset(y, normMat)
 	# y is now ready for estimate dispersion functions see edgeR User's Guide
 
@@ -99,7 +109,7 @@ filename <- "DGEList.Rds"
 saveRDS(DGE, file = filename)
 
 cat(paste(
-	"\n~~ edgeR.R complete ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n",
+	"\n~~ edgeR_DGEList.R complete ~~~~~~~~~~~~~~~~~~~~~\n",
 	"Output:\t", filename,
 	"\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
 ))

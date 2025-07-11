@@ -11,7 +11,7 @@ include { EDGER_DGELIST   } from './modules/edgeR/DGEList/main'
 include { EDGER_QC_PLOTS  } from './modules/edgeR/QC_plots/main'
 include { DIFF_EXPRESSION } from './modules/diff_expression/main'
 //include { LONGTABLE       } from './modules/longtable.nf'
-//include { DMG_TABLE           } from './modules/diffmeth_tables.nf'
+
 //include { GENE_ONTOLOGY       } from './modules/gene_ontology.nf'
 //include { SUPPLEMENTARY_EXCEL } from './modules/supplementary.nf'
 //include { SUPPLEMENTARY_PLOTS } from './modules/supplementary.nf'
