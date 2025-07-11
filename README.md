@@ -41,8 +41,6 @@ nextflow run andreyhgl/transcriptome-analysis \
   --quant_path 'path-to-quant-files' \
   --metadata 'path-to-metadata.csv' \
   --tx2gene 'path-to-tx2gene.tsv' \
-  --generation "F0,F1,F2" \
-  --treatment "10,100" \
   -profile local \
   -resume
 ```
