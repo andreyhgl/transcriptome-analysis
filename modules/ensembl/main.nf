@@ -18,7 +18,7 @@ process ENSEMBL {
   script:
   """
   # set environment variables for biomart cache
-  export BIOMART_CACHE="\$NXF_TEMP"
+  export BIOMART_CACHE="./.cache"
 
   ensembl.R ${reference_genome}
   """
