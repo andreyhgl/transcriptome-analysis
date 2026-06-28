@@ -7,7 +7,7 @@
 This repository holds a nextflow pipeline for analysing **gene expression** studies. The the pipeline allows for experimental design with multiple doses (0, 10, 100, 1000, etc). The pipeline expect quantification files (`quant.sf`) with a transcript-to-gene index file (`tx2gene.tsv`), both generated with Salmon, and sample metadata file as input. The pipeline outputs tables of (1) **differentially expressed genes** and (2) **gene ontology** analysis results which are combined to a report generated with Quarto. The pipeline also outputs the tables as `excel` files to be included as supplementary tables in a scientic report.
 
 > [!IMPORTANT]
-> This pipeline is optimised for SLURM on a high-performance computing (HPC) cluster ([pelle@uppmax.uu.se](https://docs.uppmax.uu.se/cluster_guides/pelle/))
+> This pipeline is optimised for SLURM on a high-performance computing (HPC) cluster ([UPPMAX](https://docs.uppmax.uu.se/cluster_guides/pelle/)).
 
 <details><summary>Quantification files</summary><br>
 
