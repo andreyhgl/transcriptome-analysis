@@ -1,0 +1,11 @@
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - conda-forge::r-base
+  - conda-forge::quarto
+  - conda-forge::r-scales=1.4.0
+  - conda-forge::r-ggplot2
+  - conda-forge::r-patchwork
+  - conda-forge::r-rcolorbrewer
+  - bioconda::bioconductor-deseq2

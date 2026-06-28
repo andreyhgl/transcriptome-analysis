@@ -5,25 +5,31 @@
  */
 
 // ~~ Import processes ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ *
-//include { PCA_PLOTS           } from './modules/pca_plots.nf'
-include { ENSEMBL         } from './modules/ensembl/main'
-include { EDGER_DGELIST   } from './modules/edgeR/DGEList/main'
-include { EDGER_QC_PLOTS  } from './modules/edgeR/QC_plots/main'
-include { DIFF_EXPRESSION } from './modules/diff_expression/main'
-//include { LONGTABLE       } from './modules/longtable.nf'
 
-//include { GENE_ONTOLOGY       } from './modules/gene_ontology.nf'
-//include { SUPPLEMENTARY_EXCEL } from './modules/supplementary.nf'
-//include { SUPPLEMENTARY_PLOTS } from './modules/supplementary.nf'
-//include { WRAPPER             } from './modules/wrapper.nf'
-//include { REPORT              } from './modules/report.nf'
-
-// ~~ Channels ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ *
+include { METADATA            } from './modules/metadata/main'
+include { ENSEMBL             } from './modules/ensembl/main'
+include { DESEQ2_DESEQ        } from './modules/DESeq2/DESeq/main'
+include { DESEQ2_RESULTS      } from './modules/DESeq2/results/main'
+include { DESEQ2_QC_PLOTS     } from './modules/DESeq2/QC_plots/main'
+include { DESEQ2_DGE_PLOTS    } from './modules/DESeq2/DGE_plots/main'
+include { PATHWAY_ENRICHMENT  } from './modules/pathway_enrichment/main'
+include { QUARTO_NOTEBOOK     } from './modules/Quarto/notebook/main'
+//include { QUARTO_REPORT       } from './modules/Quarto/report/main'
 
 log.info \
   """
   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    Outdir                    : ${params.outdir}
+   > Diff. analysis R-packages  : ${params.diff_analysis_package}
+   > Outdir                     : ${params.outdir}
+  
+  ~~ Ensembl arguments ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   > Genome                     : ${params.ensembl_genome}
+   > Version                    : ${params.ensembl_version}
+   > Species                    : ${params.species}
+  
+  ~~ Experiment arguments ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   > Samples info               : ${params.sample_info}
+   > Seq. files metadata?       : ${params.seqfiles_metadata}
   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   """
   .stripIndent(true)
@@ -32,111 +38,139 @@ log.info \
 
 workflow {
 
-  ENSEMBL( params.reference_genome )
+  /*
+    Work-around for passing an 'empty' argument to a process
+    input: path() cannot handle null, false or '', but and empty list is OK, []
+  */
 
-  ch_ensembl_dataset  = ENSEMBL.out.ENSEMBL_DATASET
+  sample_info = params.sample_info ? file ( params.sample_info, checkIfExists: true) : []
 
-  ch_quantfiles       = Channel.fromPath(params.quant_path)
-  ch_metadata         = Channel.fromPath(params.metadata)
-  ch_tx2gene          = Channel.fromPath(params.tx2gene)
+  seqfiles_metadata = params.seqfiles_metadata ? file ( params.seqfiles_metadata, checkIfExists: true) : []
+    
+  ENSEMBL (
+    params.species,
+    params.ensembl_version
+  )
 
-  EDGER_DGELIST (
+  ch_ensembl_table          = ENSEMBL.out.ensembl_table
+
+  METADATA (
+    sample_info,
+    seqfiles_metadata,
+    samples_to_remove
+  )
+
+  ch_metadata               = METADATA.out.metadata
+
+  DESEQ2_DESEQ (
     ch_metadata,
-    ch_quantfiles,
-    ch_tx2gene
+    params.quant_files,
+    params.tx2gene
   )
 
-  ch_DGEList          = EDGER_DGELIST.out.DGEList
+  ch_DDS                    = DESEQ2_DESEQ.out.DDS
 
-  EDGER_QC_PLOTS (
-    ch_DGEList
+
+  DESEQ2_RESULTS (
+    ch_ensembl_table,
+    ch_DDS
   )
 
-  DIFF_EXPRESSION (
-    ch_DGEList,
-    ch_ensembl_dataset
+  ch_genexp_table           = DESEQ2_RESULTS.out.genexp_table
+//  ch_count                  = DESEQ2_RESULTS.out.unique_genes_count
+
+  DESEQ2_QC_PLOTS (
+    ch_DDS
   )
 
-/*
-  LONGTABLE (
-    ch_DGEList,
-    ch_ensembl_dataset
+  DESEQ2_DGE_PLOTS (
+    ch_DDS,
+    ch_genexp_table
   )
 
-
-
-
-
-
-
-  DMR_TABLE (
-    METHYLKIT.out.collect(),
-    ch_ensembl_dataset,
-    ch_cpgislands_GRCm39,
-    ch_refseq_UCSC_GRCm39,
-    genomic_features
+  PATHWAY_ENRICHMENT (
+    params.species,
+    ch_ensembl_table,
+    ch_DDS,
+    ch_genexp_table
   )
 
-  DMG_TABLE (
-    DMR_TABLE.out.DMR_TABLES.collect(),
-    ch_ensembl_dataset,
-    DMG_table_output,
-    genomic_features
+  ch_pathway_enrichment     = PATHWAY_ENRICHMENT.out.pathway_enrichment_table
+
+  QUARTO_NOTEBOOK (
+    params.quarto_report_file,
+    params.quarto_meta,
+    params.quarto_css,
+    ch_ensembl_table,
+    ch_DDS,
+    ch_genexp_table,
+    ch_pathway_enrichment
   )
 
-  GENE_ONTOLOGY (
-    DMR_TABLE.out.DMR_TABLES.collect(),
-    ch_ensembl_dataset,
-    genomic_features
-  )
+  //ch_count.splitText().view( num -> " \n> Number of unique genes: $num\n")
 
-  SUPPLEMENTARY_EXCEL (
-    DMR_TABLE.out.DMR_TABLES.collect(),
-    genomic_features
-  )
-
-  SUPPLEMENTARY_PLOTS (
-    ch_metadata,
-    DMR_TABLE.out.DMR_TABLES.collect(),
-    BETAVALUES.out.BETAVALUES.collect(),
-    genomic_features
-  )
-
-  WRAPPER ( // concatinate all tables w/ genomic features
-    DMR_TABLE.out.DMR_TABLES.collect(),
-    DMG_TABLE.out.DMG_TABLES.collect(),
-    BETAVALUES.out.BETAVALUES.collect(),
-    GENE_ONTOLOGY.out.GO_TABLES.collect()
-  )
-
-  REPORT (
-    WRAPPER.out.collect(),
-    ch_metadata,
-    ch_ensembl_dataset,
-    generations,
-    genomic_features
-  )
-
-*/  
 }
 
 workflow.onComplete {
-  def msg = """\
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    Pipeline execution summary
-    --------------------------
-    Completed at     : ${workflow.complete}
-    Duration         : ${workflow.duration}
-    Success          : ${workflow.success}
-    workDir          : ${workflow.workDir}
-    exit status      : ${workflow.exitStatus}
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    """
-    .stripIndent()
 
-  sendMail (
-    to: "${params.email}",
-    subject: 'Transcriptome analysis',
-    body: msg
-  )
+  if (workflow.success) {
+
+    def summary = """
+    ==============================================
+     Pipeline Complete
+    ==============================================
+     Completed at             : ${workflow.complete}
+     Duration                 : ${workflow.duration}
+     Success                  : ${workflow.success}
+     Exit status              : ${workflow.exitStatus}
+     Work dir                 : ${workflow.workDir}
+     Run name                 : ${workflow.runName}
+     Outdir                   : ${params.outdir}
+    ----------------------------------------------
+     Parameters
+    ----------------------------------------------
+     Coverage files           : ${params.quant_files}
+     Seq. files metadata      : ${params.seqfiles_metadata}
+     Ensembl Genome           : ${params.ensembl_genome}
+     Ensembl Version          : ${params.ensembl_version}
+     Species                  : ${params.species}
+    ----------------------------------------------
+     Results
+    ----------------------------------------------
+    """.stripIndent()
+
+    /*
+     * Place holder, adjust ongoing project 
+    
+
+    // Read each log file and append
+    def log_files = [
+      "logs/table1.log",
+      "logs/table2.tsv"
+    ]
+
+    log_files.each { rel_path ->
+      def f = new File("${params.outdir}/${rel_path}")
+      if (f.exists()) {
+        summary += " [${f.name}]\n"
+        summary += f.text + "\n"
+      } else {
+        summary += " [${rel_path}] not found\n\n"
+      }
+    }
+    */
+
+
+    summary += "==============================================\n"
+    summary += " End of Report\n"
+    summary += "==============================================\n"
+
+    def timestamp = workflow.complete.format("yyyy-MM-dd_HH-mm-ss")
+    def log_file = new File("${params.outdir}/logs/pipeline_summary_${timestamp}.log")
+    log_file.text = summary
+    log.info summary
+
+  } else {
+    log.error "Pipeline failed, exit: ${workflow.exitStatus}"
+  }
 }

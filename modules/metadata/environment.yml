@@ -1,0 +1,6 @@
+channels:
+  - conda-forge
+dependencies:
+  - conda-forge::r-base
+  - conda-forge::r-openxlsx=4.2.8
+  - conda-forge::r-gtools=3.9.5

@@ -4,5 +4,6 @@ channels:
 dependencies:
   - conda-forge::r-base
   - conda-forge::r-gtools=3.9.5
-  - bioconda::bioconductor-edgeR
+  - conda-forge::r-scales=1.4.0
+  - bioconda::bioconductor-deseq2
   - bioconda::bioconductor-tximport

@@ -1,0 +1,11 @@
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - conda-forge::r-base
+  - conda-forge::r-gtools=3.9.5
+  - conda-forge::r-openxlsx=4.2.8
+  - conda-forge::r-gtools=3.9.5
+  - conda-forge::r-data.table
+  - bioconda::bioconductor-deseq2
+  - bioconda::bioconductor-edgeR

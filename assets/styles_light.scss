@@ -1,0 +1,32 @@
+/*-- scss:rules --*/
+
+
+/* ----- TAB TEXT ----- */
+
+/* Active tab */
+.nav-tabs .nav-link.active {
+  color: #333333;      /* white */
+  font-weight: 800;    /* bold */
+}
+
+/* Inactive tab */
+.nav-tabs .nav-link {
+  color: #778491;      /* light gray */
+  font-weight: 600;    /* semi-bold */
+}
+
+/* Hover state */
+.nav-tabs .nav-link:hover {
+  color: #004589;
+}
+
+/* dashboard logo size, default ~32px */
+$logo-height: 160px;
+
+.quarto-dashboard {
+
+  /* valuebox text size */
+  .bslib-value-box .value-box-value {
+    font-size: clamp(.1em, 10cqw, 5em) !important;
+  }
+}

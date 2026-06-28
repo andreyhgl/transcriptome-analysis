@@ -1,0 +1,29 @@
+author:                     "Andrey Höglund"
+date:                       today
+
+format: 
+  html:
+    css:                    assets/styles.css
+    theme:                  pulse
+
+    other-links:
+      - text:               karlssonlab.se
+        icon:               house-door-fill
+        href:               https://karlssonlab.se/
+
+    linestretch:            1.5
+    toc:                    true
+    toc-location:           left
+    smooth-scroll:          true
+    code-fold:              true
+    code-tools:             true
+
+output-file:                REPORTNAME
+output-ext:                 html
+
+embed-resources:            true
+warning:                    false
+echo:                       false
+
+callout-appearance:         default
+callout-icon:               true

@@ -1,25 +1,26 @@
 process ENSEMBL {
-  tag "Building database for ${reference_genome}"
-  //label
+  tag "Building ensembl table: ${species} v. ${ensembl_version}"
+  label 'process_single'
   
   conda "${moduleDir}/environment.yml"
-  container 'library://andreyhgl/singularity-r/rnaseq'
-  
-  time 1.h
-  memory 8.GB
-  cpus 1
+  container "${ workflow.containerEngine == 'singularity' ?
+    'docker://ghcr.io/karlssonlaboratory/methylkit-env:6b7f121' :
+    'ghcr.io/karlssonlaboratory/methylkit-env:6b7f121' }"
 
   input:
-  val reference_genome
+  val species
+  val ensembl_version
 
   output:
-  path 'ensembl_dataset.csv.gz', emit: ENSEMBL_DATASET
+  path 'ensembl_table.csv.gz', emit: ensembl_table
 
   script:
   """
   # set environment variables for biomart cache
-  export BIOMART_CACHE="./.cache"
+  export BIOMART_CACHE="./cache/"
 
-  ensembl.R ${reference_genome}
+  ensembl.R \
+    --species ${species} \
+    --ensembl_version ${ensembl_version}
   """
 }

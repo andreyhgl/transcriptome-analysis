@@ -1,0 +1,584 @@
+---
+title: ""
+subtitle: "Bulk RNA-seq"
+
+params:
+  testing: FALSE
+---
+
+```{r}
+#| label: Libraries
+
+suppressPackageStartupMessages({
+  library(DESeq2)
+  library(ggvenn)
+  #library(patchwork)
+  library(RColorBrewer)
+  #library(cowplot)
+  library(ggplot2)
+  library(ggrepel)
+  #library(gtools)
+  library(scales)
+  #library(ggsignif)
+  #library(stringr)
+  library(dplyr)
+  library(circlize)
+
+  library(gt) # https://gt.rstudio.com/reference/index.html
+  library(DT)
+  library(reactable)
+  #library(forcats)
+  
+  # load ComplexHeatmap after pheatmap (occupies same namespace)
+  #library(pheatmap)
+  #library(ComplexHeatmap)
+})
+```
+
+```{r}
+#| include: false
+
+# workaround
+# datatable is not generating any tables when executed inside a code chunk
+# w/ output: asis, unless datatable() was called in a regular code chunk
+datatable(data.frame())
+reactable(data.frame(x = character()))
+```
+
+```{r}
+#| label: Import Datasets
+
+if (params$testing) {
+  # quarto preview quarto_report.qmd -P testing:TRUE
+  setwd("analysis/data/")
+  cat(" > Using local working directory!\n")
+}
+
+dds <- readRDS("DDS.Rds")
+genexp <- read.csv("genexp_table.csv.gz")
+ens <- read.csv("ensembl_table.csv.gz")
+pathway_enrichment <- readRDS("pathway_enrichment.Rds")
+```
+
+::: {.callout-note title="Method" collapse=true}
+
+This experiment tests the effects of ...
+
+```{r}
+#| label: tbl-metadata_counts
+#| tbl-cap: "Sample counts by group"
+
+meta <- data.frame(colData(dds))
+
+as.data.frame(table(meta$treatment)) |>
+  setNames(c("Group", "N")) |>
+  gt() |>
+
+  # bold the column headers
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_column_labels()
+  ) |>
+  
+  # zebra striping on the body rows
+  opt_row_striping() |>
+  tab_options(
+    row.striping.background_color = "#f2f6fc",
+    table.border.top.color = "#cccccc",
+    column_labels.border.bottom.color = "#888888",
+    column_labels.border.bottom.width = px(2)
+  ) |>
+  cols_align(align = "left", columns = Group) |>
+  cols_align(align = "center", columns = N)
+```
+
+#### Sequencing
+
+Samples were sequenced on NovaSeqXPlus (NovaSeqXSeries Control Software 1.3.1.59007) with a 151nt(Read1)-10nt(Index1)-10nt(Index2)-151nt(Read2) setup using '10B' mode flowcell.
+
+#### Alignment & quantification
+
+2. Methods (brief, reproducible)
+Sequencing platform, alignment/quantification tool (e.g. Salmon, STAR + featureCounts), DE method (DESeq2 / edgeR / limma-voom), and thresholds (e.g. adjusted p < 0.05, |log2FC| > 1). Capture package versions — sessionInfo() at the end covers this.
+
+The ready-made nfcore/rnaseq computational pipeline (ver. 3.26.0), https://nf-co.re/rnaseq/3.26.0/. This pipeline aligns the sequencing files (`*.fastq.gz`) and produces quantification files (`*.quant.sf`). Default parameters were used expect for these: `--trimmer fastq --gcBias`
+
+#### Biological question
+
+We expect an effect ...
+
+:::
+
+## Results
+
+### Differentially expressed genes
+
+```{r}
+DBP <- genexp[genexp$sign == "sign", "ensembl_gene_id"]
+
+DBP10 <- genexp[
+  genexp$contrast == "treatment_10_vs_0" &
+  genexp$sign == "sign",
+  "ensembl_gene_id"]
+
+DBP100 <- genexp[
+  genexp$contrast == "treatment_100_vs_0" &
+  genexp$sign == "sign",
+  "ensembl_gene_id"]
+
+DBPboth <- intersect(DBP10, DBP100)
+
+genexp$common <- FALSE
+genexp$common[genexp$ensembl_gene_id %in% DBPboth] <- TRUE
+
+len <- function(x) scales::comma(length(na.omit(unique(x))))
+frac <- function(x, y) round(length(x) / length(y) * 100, 2)
+```
+
+ In total, **`r len(DBP)`** genes were **d**ifferentially **e**xpressed (DE), of which **`r len(DBP10)`** and **`r len(DBP100)`** were identified in 10 and 100 mg/kg group, respectively. Between the groups `r len(DBPboth)` DE genes were identified (% of 10mg/kg: `r frac(DBPboth, DBP10)` % and 100mg/kg: `r frac(DBPboth, DBP100)` % ), see @tbl-summarytable.
+
+```{r}
+#| label: tbl-summarytable
+#| tbl-cap: "Summary table of the differentially expressed genes"
+
+DBP10 <- genexp[
+  genexp$contrast == "treatment_10_vs_0" &
+  genexp$sign == "sign", ]
+DBP100 <- genexp[
+  genexp$contrast == "treatment_100_vs_0" &
+  genexp$sign == "sign", ]
+
+data <- data.frame(
+  Total = genexp[genexp$sign == "sign", "ensembl_gene_id"] %>% len,
+  Common = DBPboth %>% len,
+  DBP10_up = sum(DBP10$type == "Up"),
+  DBP10_down = sum(DBP10$type == "Down"),
+  DBP100_up = sum(DBP100$type == "Up"),
+  DBP100_down = sum(DBP100$type == "Down")
+)
+
+# \u2191 = ↑
+# \u2193 = ↓
+
+data %>%
+  mutate(
+    DBP10 = paste0(
+      comma(DBP10_up+DBP10_down),
+      " (\u2191 ", comma(DBP10_up),
+      " : \u2193 ", comma(DBP10_down), ")"),
+    DBP100 = paste0(
+      comma(DBP100_up+DBP100_down),
+      " (\u2191 ", comma(DBP100_up),
+      " : \u2193", comma(DBP100_down), ")")) %>%
+  dplyr::select(Total, Common, DBP10, DBP100) %>%
+  gt() %>%
+  
+  # Prevent wrapping (single-line cells): whitespace = "nowrap"
+  tab_style(
+    style = cell_text(whitespace = "nowrap"),
+    locations = cells_body()) %>%
+  fmt_number(
+    columns = where(is.numeric),
+    decimals = 0,
+    sep_mark = ",",
+    dec_mark = ".") %>%
+  tab_spanner(label = "DBP", columns = c("DBP10", "DBP100")) %>%
+  cols_label(
+    DBP10 = "10 mg/kg", DBP100 = "100 mg/kg") %>%
+  cols_align(align = "right") %>%
+  opt_stylize(style = 5, color = "cyan")
+```
+
+#### Venn diagram
+
+```{r}
+#| fig-height: 5
+#| label: fig-DGE-venn
+#| fig-cap: "Differentially expressed genes between groups"
+
+genelist <- lapply(unique(genexp$contrast), function(contrast){
+  unique(genexp[genexp$contrast %in% contrast & genexp$sign == "sign", "ensembl_gene_id"])
+})
+names(genelist) <- sub("treatment_(\\d+)_.*", "\\1", unique(genexp$contrast))
+names(genelist) <- paste0("DBP", names(genelist), "mg/kg")
+
+ggvenn(
+  genelist,
+  text_size = 5,      # intersection text
+  set_name_size = 5,    # venn-names
+  stroke_size = 0.6,
+  fill_alpha = 0.6,
+  fill_color = brewer.pal(8, "Dark2"),
+  text_color = "black",
+  show_percentage = TRUE,
+  digit = 1) + 
+  theme(plot.title = element_text(hjust = 0.5, size = rel(1.5)))
+```
+
+#### Gene type distribution
+
+```{r}
+#| label: fig-genetype-pies
+#| fig-cap: "Gene-type distribution of significant DEGs, by dose group and for genes in common in both groups."
+#| fig-width: 6
+#| fig-height: 3
+
+sig <- genexp[genexp$sign == "sign", ]
+
+low_ids <- unique(sig$ensembl_gene_id[sig$contrast == "treatment_10_vs_0"])
+high_ids <- unique(sig$ensembl_gene_id[sig$contrast == "treatment_100_vs_0"])
+common_ids <- intersect(low_ids, high_ids)
+
+# gene -> type is constant per gene, so one row per gene
+gene_type <- unique(genexp[, c("ensembl_gene_id", "gene_type2")])
+
+build_counts <- function(ids, set_label) {
+  gt <- gene_type[gene_type$ensembl_gene_id %in% ids, ]
+  out <- as.data.frame(table(gt$gene_type2))
+  colnames(out) <- c("gene_type2", "n")
+  out$set <- set_label
+  out[out$n > 0, ]
+}
+
+# dynamic labels carry the set size into the facet title
+label_low <- sprintf("10 mg/kg (n=%d)", length(low_ids))
+label_high <- sprintf("100 mg/kg (n=%d)", length(high_ids))
+label_common <- sprintf("Common (n=%d)", length(common_ids))
+
+pie_df <- rbind(
+  build_counts(low_ids, label_low),
+  build_counts(high_ids, label_high),
+  build_counts(common_ids, label_common)
+)
+pie_df$set <- factor(
+  pie_df$set,
+  levels = c(label_low, label_high, label_common)
+)
+
+# midpoint y-position of each slice, matching how geom_col stacks
+pie_df <- pie_df |>
+  group_by(set) |>
+
+  # stacking order (top = first level)
+  arrange(desc(gene_type2)) |>
+  mutate(
+    pct = n / sum(n),
+    ypos = cumsum(pct) - 0.5 * pct,
+    label = sprintf("%.0f%%", 100 * pct)) |>
+  ungroup()
+
+ggplot(pie_df, aes(x = 1, y = pct, fill = gene_type2)) +
+  geom_col(width = 1, color = "black", linewidth = 0.3) +
+  coord_polar(theta = "y") +
+  facet_wrap(~ set) +
+  geom_text_repel(aes(y = ypos, label = label, x = 1.6),
+    size = 4, direction = "y",
+    nudge_x = 0.3, segment.size = 0.2,
+    segment.color = "grey50", min.segment.length = 0) +
+  scale_x_continuous(limits = c(0.5, 2)) +
+  scale_fill_brewer(
+    palette = "Set2",
+    name = "Gene type",
+    guide = guide_legend(reverse = TRUE)) +
+  theme_void(base_size = 15) +
+  theme(
+    legend.position = "bottom",
+    strip.text = element_text(face = "bold"),
+    plot.margin = margin(t = 10, r = 5, b = 5, l = 5),
+    strip.clip = "off",
+    legend.text = element_text(size = 9),
+    legend.title = element_text(size = 10)
+  )
+```
+
+#### Genomic distribution of DE genes
+
+```{r}
+#| label: fig-circos-degs
+#| fig-cap: "Differentially expressed genes across the mouse genome. Point colour shows direction (red = up, blue = down). Track A and B shows DBP doses; 10 mg/kg (N=176) and 100 mg/kg (N=642), respectively. The most inner track shows the gene names of the top 30 highest adjusted p-value."
+#| fig-width: 8
+#| fig-height: 8
+
+# Curate genexp-table
+genexp_circlize <- genexp[!is.na(genexp$start) & !is.na(genexp$end), ]
+genexp_circlize$mid <- round((genexp_circlize$start + genexp_circlize$end) / 2)
+
+make_bed <- function(d) {
+  data.frame(
+    chr = d$chr,
+    start = d$mid,
+    end = d$mid,
+    log2FC = d$log2FoldChange,
+    sig = d$sign == "sign",
+    direction = d$type,
+    gene = d$gene_name,
+    stringsAsFactors = FALSE
+  )
+}
+bed_low  <- make_bed(genexp_circlize[genexp_circlize$contrast == "treatment_10_vs_0",  ])
+bed_high <- make_bed(genexp_circlize[genexp_circlize$contrast == "treatment_100_vs_0", ])
+
+yr <- max(abs(genexp_circlize$log2FoldChange), na.rm = TRUE)
+ylim <- round(c(-yr, yr), 1)
+
+# point colour = direction; bg = dose (passed in per track)
+add_fc_track <- function(bed, ylim, bg, name) {
+  circos.genomicTrack(
+    bed, 
+    ylim = ylim,
+    bg.col = bg, 
+    #bg.border = NA,
+    track.height = 0.12,
+    panel.fun = function(region, value, ...) {
+      cols <- ifelse(value$direction == "Up", "red", "blue")
+      cols <- adjustcolor(cols, alpha.f = 0.8) # adjust alpha
+      cex <- ifelse(value$direction == "Up", 0.4, 0.5)
+      circos.lines(CELL_META$cell.xlim, c(0, 0), col = "grey20", lty = 2)
+      circos.genomicPoints(region, value,
+        numeric.column = 1, # = log2FC
+        pch = 16,
+        cex = cex,
+        col = cols
+      )
+    })
+
+  # add track ticks (fold change value)
+  circos.yaxis(
+    side = "right",
+    at = round(c(-yr, 0, yr) * 0.9, 0),
+    labels.cex = 0.5,
+    sector.index = get.all.sector.index()[length(get.all.sector.index())]
+  )
+
+  # Add track name
+  circos.yaxis(
+    side = "left", at = 0, tick = FALSE,
+    sector.index = get.all.sector.index()[1],
+    labels = name,
+    labels.niceFacing = TRUE,
+    labels.cex = 1
+  )
+}
+
+
+# Draw circle
+circos.clear()
+
+# number chromosomes
+chrom  <- read.cytoband(species = "mm39")$chromosome
+circos.par(
+  start.degree = 90,
+  gap.degree = c(rep(0.9, length(chrom) - 1), 10),
+  track.margin = c(0.01, 0),    # distance above and below tracks
+  cell.padding = c(0, 0, 0, 0), # distance inside the tracks, "frame"
+  track.height = 0.2
+)
+circos.initializeWithIdeogram(species = "mm39")
+
+bg_low  <- "#C9C8CA"   # light grey = 10 mg/kg
+bg_high <- "#A8A7AA"   # darker grey = 100 mg/kg
+
+add_fc_track(bed_low,  ylim, bg_low, "A")    # outer = 10 mg/kg
+add_fc_track(bed_high, ylim, bg_high, "B")   # inner = 100 mg/kg
+
+# labels LAST + side = "inside"
+top <- genexp_circlize[genexp_circlize$sign == "sign", ]
+top <- top[order(top$padj), ]
+top <- head(top[!duplicated(top$gene_name), ], 30)
+circos.genomicLabels(
+  data.frame(top$chr, top$mid, top$mid, top$gene_name),
+  labels.column = 4, side = "inside", cex = 0.7, padding = 0.6
+)
+
+# two legends: point colour = direction, track = dose
+legend(
+  "bottomleft", inset = 0.02, bty = "n", title = "Direction",
+  pch = 16, pt.cex = 1.5, cex = 0.8,
+  col = c("red", "blue"),
+  legend = c("Up", "Down")
+)
+legend(
+  "bottomright", inset = 0.02, bty = "n", title = "Track: DBP dose",
+  pch = 22, pt.cex = 1.7, cex = 0.8, pt.lwd = 1,
+  pt.bg = c(bg_low, bg_high),
+  legend = c("A: 10 mg/kg", "B: 100 mg/kg")
+)
+circos.clear()
+```
+
+#### DE genes in table form
+
+Below are all DE genes sorted by adjusted p-value, @tbl-DEGs. All columns are sortable. In column "Contrast" type; "10" or "100" to only display genes found in group 10mg/kg or 100mg/kg. Column "In common" tells if the DE gene occurs in both groups.
+
+```{r}
+#| column: page
+#| label: tbl-DEGs
+#| tbl-cap: "All differentially expressed genes sorted by adjusted p-value"
+
+top_tbl <- genexp[genexp$sign == "sign", ]
+top_tbl <- top_tbl[order(top_tbl$padj), ]
+
+# columns worth showing in the report
+top_tbl <- top_tbl[, c(
+  "gene_name", "chr",
+  "contrast", "common", "type", "log2FoldChange",
+  "padj", "gene_type2", "gene_info")
+]
+
+datatable(
+  top_tbl,
+  rownames = FALSE,
+  filter = "top",
+  colnames = c(
+    "Gene", "Chr", "Contrast", "In Common",
+    "Direction", "log2FC", "padj", "Type", "Description"),
+  options = list(
+    pageLength = 10,
+    order = list(list(7, "asc")),   # sort by padj (0-indexed col 7)
+    scrollX = TRUE
+  )
+) |>
+  formatRound("log2FoldChange", digits = 2) |>
+  formatSignif("padj", digits = 3)
+```
+
+### Pathway enrichment
+
+::: {.callout-note title="For manuscript" collapse=true}
+
+To investigate if any biological functions, processes or pathways were enriched (over-represented) we used the _Over Representation Analysis (ORA)_ [Boyle et al., 2004](https://doi.org/10.1093/bioinformatics/bth456) method. ORA tests DE gene lists against annotated gene sets and uses hypergeometric/Fishers test. The _p_-values are adjusted for multiple corretion (significance threshold `p value < 0.05`). Enrichment terms with fewer than 3 genes were dropped.
+
+> "KEGG is a database resource for understanding high-level functions and utilities of the biological system, such as the cell, the organism and the ecosystem, from molecular-level information, especially large-scale molecular datasets generated by genome sequencing and other high-throughput experimental technologies." [source](https://www.genome.jp/kegg/)<br>
+> "REACTOME is an open-source, open access, manually curated and peer-reviewed pathway database. Our goal is to provide intuitive bioinformatics tools for the visualization, interpretation and analysis of pathway knowledge to support basic and clinical research, genome analysis, modeling, systems biology and education." [source](https://reactome.org/what-is-reactome)
+
+:::
+
+The tables below come with a drop-down menu which shows the genes included in the gene set, ranked by their log2 fold change value. Click on the arrow ▶ on the left side of each row to reveal the gene sets. Gene names inside the gene sets contain links to the corresponding [NCBI gene webpage](https://www.ncbi.nlm.nih.gov/gene). The tooltip (appears when hovering) shows the log2 fold change for that gene.
+
+```{r}
+enrichment_table <- function(pathway_enrichment, contrast, type) {
+  # Include the gene names for each pathway enrichment term
+  # The gene names are links to the ncbi webpage
+  # Also order the gene names based on log2FoldChange
+  # Add the log2FoldChange as tooltip, when hovering the gene name
+
+  d <- pathway_enrichment[
+    pathway_enrichment$contrast == contrast &
+    pathway_enrichment$type == type,
+  ] |> arrange(p.adjust)
+
+  # named vector of genes and the log2FoldChange
+  fc <- genexp[genexp$contrast == contrast, c("gene_name", "log2FoldChange")]
+  fc <- fc[!duplicated(fc$gene_name), ]
+  fc_lookup <- setNames(fc$log2FoldChange, fc$gene_name)
+
+  reactable(
+    d[, c("Description", "ONTOLOGY", "ID", "Count", "p.adjust")],
+    columns = list(
+      Description = colDef(name = "Term", minWidth = 200),
+      ONTOLOGY = colDef(name = "Ont.", maxWidth = 90),
+      ID = colDef(name = "GO Term", maxWidth = 160),
+      Count = colDef(maxWidth = 70),
+      p.adjust = colDef(
+        name = "p.adj",
+        maxWidth = 90,
+        format = colFormat(digits = 3))
+    ),
+    details = function(index) {
+      genes <- d$gene_name[[index]]
+      lfc <- fc_lookup[genes]
+      ord <- order(lfc, decreasing = TRUE, na.last = TRUE)
+      genes <- genes[ord]
+      lfc <- lfc[ord]
+      link_tags <- lapply(seq_along(genes), function(i) {
+        genename <- genes[i]
+        v <- lfc[i] # log2FoldChange value
+
+        # tooltip w/ color
+        tip <- if (is.na(v)) "log2FC: NA" else sprintf("log2FC: %.2f", v)
+        col <- if (is.na(v)) "#555" else if (v > 0) "#c0392b" else "#2c5f8a"
+        htmltools::a(
+          genename,
+          href = sprintf(
+            "https://www.ncbi.nlm.nih.gov/gene/?term=%s",
+            utils::URLencode(genename)),
+          target = "_blank", rel = "noopener",
+          title  = tip,
+          style  = sprintf("color:%s;", col)
+        )
+      })
+
+      # interleave ", " between the link tags
+      children <- vector("list", max(0, 2 * length(link_tags) - 1))
+      if (length(link_tags) > 0) {
+        children[seq(1, length(children), by = 2)] <- link_tags
+        if (length(link_tags) > 1)
+          children[seq(2, length(children), by = 2)] <- ", "
+      }
+
+      htmltools::div(
+        style = "padding: 8px 16px; font-size: 0.8em;",
+        htmltools::strong("Genes (sorted by log2FC): "),
+        children
+      )
+    },
+    defaultPageSize = 10, striped = TRUE, highlight = TRUE, compact = TRUE,
+    theme = reactableTheme(cellPadding = "4px 6px")
+  )
+}
+```
+
+## DBP10
+
+```{r}
+#| panel:   tabset
+#| output:  asis
+#| column:  page
+
+contrast <- "treatment_10_vs_0"
+types <- unique(pathway_enrichment$type)
+
+for (type in types) {
+
+  res <- enrichment_table(pathway_enrichment, contrast, type)
+
+  title_tabset <- paste(
+    paste0("DBP", sub("treatment_(\\d+)_.*", "\\1", contrast)),
+    type,
+    sep = " | "
+  )
+
+  cat(sprintf("\n## %s\n", title_tabset))
+
+  print(htmltools::tagList(res))
+
+  cat("\n")
+}
+```
+
+## DBP100
+
+```{r}
+#| panel:   tabset
+#| output:  asis
+#| column:  page
+
+contrast <- "treatment_100_vs_0"
+
+for (type in types) {
+
+  res <- enrichment_table(pathway_enrichment, contrast, type)
+
+  title_tabset <- paste(
+    paste0("DBP", sub("treatment_(\\d+)_.*", "\\1", contrast)),
+    type,
+    sep = " | "
+  )
+
+  cat(sprintf("\n## %s\n", title_tabset))
+
+  print(htmltools::tagList(res))
+
+  cat("\n")
+}
+```
