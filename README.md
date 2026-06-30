@@ -1,6 +1,7 @@
 [![Nextflow](https://img.shields.io/badge/nextflow%20DSL2-%E2%89%A524.04.2-23aa62.svg)](https://www.nextflow.io/)
 [![R](https://img.shields.io/badge/-script-276DC3.svg?style=flat&logo=R)](https://cran.r-project.org)
 [![run with singularity](https://img.shields.io/badge/run%20with-singularity-1d355c.svg?labelColor=000000)](https://sylabs.io/docs/)
+[![Build with Quarto](https://img.shields.io/badge/Built_with-Quarto-69b1e9)](https://github.com/quarto-dev/quarto-cli/releases/latest)
 
 # README
 
@@ -34,9 +35,6 @@ To start the pipeline, wrap the code below into a shell script. Make sure to cha
 
 ```sh
 NXF_HOME=".nextflow/"
-
-nextflow pull andreyhgl/transcriptome-analysis
-
 PROJECT='slurm-projID'
 QUANT_FILES='path/to/quant_files'
 TX2GENE_FILE='path/to/tx2gene.tsv'
@@ -44,7 +42,9 @@ SAMPLE_INFO_FILE='path/to/sample_info'
 SPECIES='mouse/human'
 ENSEMBL_VERSION=115
 
-nextflow run main.nf \
+nextflow pull andreyhgl/transcriptome-analysis
+
+nextflow run andreyhgl/transcriptome-analysis -r main \
   -profile uppmax \
   --project "$PROJECT" \
   --diff_analysis_package 'DESeq2' \
@@ -55,7 +55,7 @@ nextflow run main.nf \
   --ensembl_version "$ENSEMBL_VERSION"
 ```
 
-<details><summary>Singularity containers</summary><br>
+<details><summary>Containers</summary><br>
 
   For reproducibility this pipeline uses two singularity containers, which can be downloaded from the [Cloud Library](https://cloud.sylabs.io/library). The `RNAseq` container holds most of the R-packages used in the analysis, while `gene-ontology` container holds gene ontology related R-packages
 
