@@ -7,8 +7,8 @@ samplesheet.csv
 seqdata/
 .nextflow.*
 .nextflow/
-results/
+/results/
 refs/
 manuscript/
-work/
-tmp/
+/work/
+/tmp/
