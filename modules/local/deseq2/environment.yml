@@ -1,0 +1,9 @@
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - bioconda::bioconductor-deseq2
+  - bioconda::bioconductor-tximport
+  - conda-forge::r-base
+  - conda-forge::r-gtools
+  - conda-forge::r-scales

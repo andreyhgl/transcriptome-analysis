@@ -1,0 +1,14 @@
+.DS_Store
+
+doc/
+*.log
+/*.sh
+samplesheet.csv
+seqdata/
+.nextflow.*
+.nextflow/
+results/
+refs/
+manuscript/
+work/
+tmp/
