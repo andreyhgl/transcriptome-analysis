@@ -36,8 +36,8 @@ def paramsSummary(monochrome) {
     return """
     ${col(c, 'purple', '---- Pipeline parameters ---------------------------------')}
     ${arrow} Outdir                 : ${col(c, 'green', params.outdir)}
-    ${arrow} quant-files dir        : ${col(c, 'green', params.quant_files_dir)}
-    ${arrow} tx2gene file           : ${col(c, 'green', params.tx2gene_file)}
+    ${arrow} quant-files dir        : ${col(c, 'green', params.quant_dir)}
+    ${arrow} tx2gene file           : ${col(c, 'green', params.tx2gene)}
     ${arrow} metadata               : ${col(c, 'green', params.metadata)}
 
     ${col(c, 'purple', '---- Ensembl Parameters ----------------------------------')}
@@ -47,9 +47,9 @@ def paramsSummary(monochrome) {
 
     ${col(c, 'purple', '---- Experimental parameters -----------------------------')}
     ${arrow} ${col(c, 'bold', 'DESeq2')}
-      ${sub} design                 : ${col(c, 'yellow', params.deseq2_design)}
-      ${sub} min. count             : ${col(c, 'yellow', params.deseq2_min_count)}
-      ${sub} max. zero fraction     : ${col(c, 'yellow', params.deseq2_max_zero_frac)}
+      ${sub} design                : ${col(c, 'yellow', params.deseq2_design)}
+      ${sub} min. count            : ${col(c, 'yellow', params.deseq2_min_count)}
+      ${sub} max. zero fraction    : ${col(c, 'yellow', params.deseq2_max_zero_frac)}
 
     ${col(c, 'purple', '----------------------------------------------------------')}
     """.stripIndent(true)
