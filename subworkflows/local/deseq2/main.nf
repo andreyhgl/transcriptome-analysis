@@ -6,7 +6,7 @@
 */
 
 include { DESEQ2_DDS     } from '../../../modules/local/deseq2/dds'
-//include { DESEQ2_RESULTS } from '../../../modules/local/deseq2/results'
+include { DESEQ2_RESULTS } from '../../../modules/local/deseq2/results'
 
 workflow DESEQ2 {
 
@@ -29,12 +29,12 @@ workflow DESEQ2 {
     DESEQ2_DDS(ch_input)
     ch_versions = ch_versions.mix(DESEQ2_DDS.out.versions.first())
 
-    //DESEQ2_RESULTS(DESEQ2_DDS.out.rds)
-    //ch_versions = ch_versions.mix(DESEQ2_RESULTS.out.versions.first())
+    DESEQ2_RESULTS(DESEQ2_DDS.out.rds)
+    ch_versions = ch_versions.mix(DESEQ2_RESULTS.out.versions.first())
 
     emit:
     rds      = DESEQ2_DDS.out.rds          // channel: [ meta, Rds ]
-    //results  = DESEQ2_RESULTS.out.results  // channel: [ meta, [ tsv ] ]
-    //summary  = DESEQ2_RESULTS.out.summary  // channel: [ meta, tsv ]
+    results  = DESEQ2_RESULTS.out.results  // channel: [ meta, [ tsv ] ]
+    summary  = DESEQ2_RESULTS.out.summary  // channel: [ meta, tsv ]
     versions = ch_versions                 // channel: [ versions.yml ]
 }

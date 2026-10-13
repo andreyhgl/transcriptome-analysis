@@ -50,6 +50,8 @@ def paramsSummary(monochrome) {
       ${sub} design                : ${col(c, 'yellow', params.deseq2_design)}
       ${sub} min. count            : ${col(c, 'yellow', params.deseq2_min_count)}
       ${sub} max. zero fraction    : ${col(c, 'yellow', params.deseq2_max_zero_frac)}
+      ${sub} alpha                 : ${col(c, 'yellow', params.deseq2_alpha)}
+      ${sub} LFC threshold         : ${col(c, 'yellow', params.deseq2_lfc_threshold)}
 
     ${col(c, 'purple', '----------------------------------------------------------')}
     """.stripIndent(true)
