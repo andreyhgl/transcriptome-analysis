@@ -2,6 +2,7 @@ channels:
   - conda-forge
   - bioconda
 dependencies:
+  - bioconda::bioconductor-apeglm
   - bioconda::bioconductor-deseq2
   - bioconda::bioconductor-tximport
   - conda-forge::r-base

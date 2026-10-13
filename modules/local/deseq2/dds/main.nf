@@ -3,7 +3,9 @@ process DESEQ2_DDS {
     label 'process_medium'
 
     conda "${moduleDir}/../environment.yml"
-    container "library://andreyhgl/singularity-r/rnaseq"
+    container "${workflow.containerEngine == 'singularity' ?
+        'docker://ghcr.io/andreyhgl/deseq2:main' :
+        'ghcr.io/andreyhgl/deseq2:main'}"
 
     input:
     tuple val(meta), path(metadata), path(tx2gene), path(quant, stageAs: 'quant/*')
