@@ -25,8 +25,8 @@
 #   colour alone can't separate that many groups reliably in a scatter plot.
 #
 # Usage:
-# > Rscript quant_qc.R --metadata metadata.csv --fill id,season,year
-# > Rscript quant_qc.R --fill id --ntop 1000 --filename quant_qc
+# > Rscript quant_qc.R --metadata metadata.csv --fill group,season,year
+# > Rscript quant_qc.R --fill group --ntop 1000 --filename quant_qc
 #
 # Container:
 # > docker://ghcr.io/andreyhgl/deseq2:main
@@ -61,7 +61,7 @@ defaults <- list(
   metadata = "data/metadata.csv",
   tx2gene = "results/star_salmon/salmon.merged.tx2gene.tsv",
   quant_dir = "results/star_salmon/",
-  fill = "id,season,year",
+  fill = "group,season,year",
   ntop = 500L
 )
 
@@ -238,7 +238,7 @@ theme_qc <- function() {
       plot.background = element_rect(fill = surface, colour = NA),
       panel.grid.minor = element_blank(),
       panel.grid.major = element_line(colour = grid_colour, linewidth = 0.3),
-      plot.title = element_text(face = "bold", hjust = 0.5),
+      plot.title = element_text(hjust = 0.5),
       legend.position = "bottom",
       legend.title = element_blank(),
     )
@@ -274,7 +274,7 @@ plot_pca <- function(df, col, var_pct) {
   p +
     scale_fill_manual(values = colours, na.value = ref_colour, guide = legend) +
     labs(
-      title = col,
+      title = stringr::str_to_title(col),
       x = sprintf("PC1 (%.1f%%)", var_pct[1]),
       y = sprintf("PC2 (%.1f%%)", var_pct[2])
     ) +
