@@ -1,12 +1,19 @@
 /*
- * Differential expression with DESeq2: import salmon quantifications with
- * tximport, filter genes and fit the model (DESEQ2_DDS), then extract every
- * group-vs-reference contrast with apeglm-shrunken fold changes
- * (DESEQ2_RESULTS)
-*/
+ * Differential expression with DESeq2: 
+ *  > QUANT_QC:       quality-check the salmon quantifications with a PCA
+ *  > DESEQ2_DDS:     import quant-files with tximport, filter genes and fit the
+ *                     model
+ *  > DESEQ2_RESULTS: extract every group-vs-reference contrast with 
+ *                     apeglm-shrunken fold changes
+ *
+ * Subworkflow emits csv with genes and their statistical values for subsequent
+ * analysis
+ */
 
+include { QUANT_QC       } from '../../../modules/local/quant_qc'
 include { DESEQ2_DDS     } from '../../../modules/local/deseq2/dds'
 include { DESEQ2_RESULTS } from '../../../modules/local/deseq2/results'
+
 
 workflow DESEQ2 {
 
@@ -26,6 +33,9 @@ workflow DESEQ2 {
             [[id: 'dds'], metadata, tx2gene, dirs]
         }
 
+    QUANT_QC(ch_input)
+    ch_versions = ch_versions.mix(QUANT_QC.out.versions.first())
+    
     DESEQ2_DDS(ch_input)
     ch_versions = ch_versions.mix(DESEQ2_DDS.out.versions.first())
 
@@ -33,8 +43,10 @@ workflow DESEQ2 {
     ch_versions = ch_versions.mix(DESEQ2_RESULTS.out.versions.first())
 
     emit:
-    rds      = DESEQ2_DDS.out.rds          // channel: [ meta, Rds ]
-    results  = DESEQ2_RESULTS.out.results  // channel: [ meta, [ tsv ] ]
-    summary  = DESEQ2_RESULTS.out.summary  // channel: [ meta, tsv ]
-    versions = ch_versions                 // channel: [ versions.yml ]
+    qc_pca     = QUANT_QC.out.pca            // channel: [ meta, pdf ]
+    qc_samples = QUANT_QC.out.samples        // channel: [ meta, tsv ]
+    rds        = DESEQ2_DDS.out.rds          // channel: [ meta, Rds ]
+    results    = DESEQ2_RESULTS.out.results  // channel: [ meta, [ tsv ] ]
+    summary    = DESEQ2_RESULTS.out.summary  // channel: [ meta, tsv ]
+    versions   = ch_versions                 // channel: [ versions.yml ]
 }

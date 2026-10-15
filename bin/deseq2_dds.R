@@ -27,7 +27,7 @@
 # > Rscript deseq2_dds.R --design batch,id
 #
 # Container:
-# > library://andreyhgl/singularity-r/rnaseq
+# > docker://ghcr.io/andreyhgl/deseq2:main
 #==============================================================================
 
 

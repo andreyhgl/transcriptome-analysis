@@ -23,7 +23,7 @@
 # > Rscript deseq2_results.R --dds dds.Rds --alpha 0.1 --lfc_threshold 1
 #
 # Container:
-# > library://andreyhgl/singularity-r/rnaseq
+# > docker://ghcr.io/andreyhgl/deseq2:main
 #==============================================================================
 
 
