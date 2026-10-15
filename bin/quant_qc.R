@@ -110,8 +110,8 @@ ink_secondary <- "#52514e"
 grid_colour <- "#e1e0d9"
 
 # Figure size per panel (inches)
-panel_width <- 4
-fig_height <- 5
+panel_width <- 5
+fig_height <- 7
 
 # Output files
 out_fig <- paste0(opt$filename, "_pca.pdf")
@@ -351,8 +351,7 @@ ggsave(
   out_fig,
   fig,
   width = panel_width * length(plots),
-  height = fig_height,
-  bg = surface
+  height = fig_height
 )
 
 write.table(
