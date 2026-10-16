@@ -4,7 +4,7 @@ process BIOMART_ANNOTATION {
 
     conda "${moduleDir}/environment.yml"
     container "${workflow.containerEngine == 'singularity' ?
-        'docker://quay.io/biocontainers/bioconductor-biomart:2.68.0--r45hdfd78af_0' :
+        'https://depot.galaxyproject.org/singularity/bioconductor-biomart:2.68.0--r45hdfd78af_0' :
         'quay.io/biocontainers/bioconductor-biomart:2.68.0--r45hdfd78af_0'}"
 
     input:
