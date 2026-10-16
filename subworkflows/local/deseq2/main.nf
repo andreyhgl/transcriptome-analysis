@@ -21,6 +21,7 @@ workflow DESEQ2 {
     ch_metadata // channel: path(metadata.csv)
     ch_tx2gene  // channel: path(tx2gene.tsv)
     ch_quant    // channel: path(sample dir with quant.sf), one item per sample
+    ch_annotation // channel: path(gene annotation csv/tsv), or [] for none
 
     main:
     ch_versions = channel.empty()
