@@ -56,8 +56,7 @@ def paramsSummary(monochrome) {
       ${sub} QC PCA n_top          : ${col(c, 'yellow', params.qc_ntop)}
       ${sub} Gene plots top_n      : ${col(c, 'yellow', params.gene_plots_top_n)}
       ${sub} Gene annotation       : ${col(c, 'yellow', params.gene_annotation)}
-      ${sub} Gene plots label      : ${col(c, 'yellow', params.gene_plots_label)}
-
+      ${sub} Gene plots labels     : ${col(c, 'yellow', params.gene_plots_labels)}
 
     ${col(c, 'purple', '----------------------------------------------------------')}
     """.stripIndent(true)
