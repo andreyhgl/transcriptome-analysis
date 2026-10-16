@@ -35,15 +35,15 @@ def paramsSummary(monochrome) {
 
     return """
     ${col(c, 'purple', '---- Pipeline parameters ---------------------------------')}
-    ${arrow} Outdir                 : ${col(c, 'green', params.outdir)}
-    ${arrow} quant-files dir        : ${col(c, 'green', params.quant_dir)}
-    ${arrow} tx2gene file           : ${col(c, 'green', params.tx2gene)}
-    ${arrow} metadata               : ${col(c, 'green', params.metadata)}
+    ${arrow} Outdir                  : ${col(c, 'green', params.outdir)}
+    ${arrow} quant-files dir         : ${col(c, 'green', params.quant_dir)}
+    ${arrow} tx2gene file            : ${col(c, 'green', params.tx2gene)}
+    ${arrow} metadata                : ${col(c, 'green', params.metadata)}
 
     ${col(c, 'purple', '---- Ensembl Parameters ----------------------------------')}
-    ${arrow} Genome                 : ${col(c, 'cyan', params.ensembl_genome)}
-    ${arrow} Version                : ${col(c, 'cyan', params.ensembl_version)}
-    ${arrow} Species                : ${col(c, 'cyan', params.species)}
+    ${arrow} Genome                  : ${col(c, 'cyan', params.ensembl_genome)}
+    ${arrow} Version                 : ${col(c, 'cyan', params.ensembl_version)}
+    ${arrow} Species                 : ${col(c, 'cyan', params.species)}
 
     ${col(c, 'purple', '---- Experimental parameters -----------------------------')}
     ${arrow} ${col(c, 'bold', 'DESeq2')}
@@ -52,6 +52,12 @@ def paramsSummary(monochrome) {
       ${sub} max. zero fraction    : ${col(c, 'yellow', params.deseq2_max_zero_frac)}
       ${sub} alpha                 : ${col(c, 'yellow', params.deseq2_alpha)}
       ${sub} LFC threshold         : ${col(c, 'yellow', params.deseq2_lfc_threshold)}
+      ${sub} QC fill               : ${col(c, 'yellow', params.qc_fill)}
+      ${sub} QC PCA n_top          : ${col(c, 'yellow', params.qc_ntop)}
+      ${sub} Gene plots top_n      : ${col(c, 'yellow', params.gene_plots_top_n)}
+      ${sub} Gene annotation       : ${col(c, 'yellow', params.gene_annotation)}
+      ${sub} Gene plots label      : ${col(c, 'yellow', params.gene_plots_label)}
+
 
     ${col(c, 'purple', '----------------------------------------------------------')}
     """.stripIndent(true)

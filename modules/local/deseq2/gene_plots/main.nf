@@ -1,6 +1,6 @@
 process DESEQ2_GENE_PLOTS {
     tag "${meta.id}"
-    label 'process_medium'
+    label 'process_parallel'
 
     conda "${moduleDir}/../environment.yml"
     container "${workflow.containerEngine == 'singularity' ?
