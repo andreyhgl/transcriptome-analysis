@@ -12,7 +12,7 @@ process DESEQ2_GENE_PLOTS {
     path annotation // optional: [] when no annotation table is given
 
     output:
-    tuple val(meta), path("${prefix}_gene_plots.pdf"), emit: pdf
+    tuple val(meta), path("${prefix}_gene_plots.pdf"), emit: plots
     tuple val(meta), path("${prefix}_gene_plots.tsv"), emit: genes
     path "versions.yml",                               emit: versions
 
