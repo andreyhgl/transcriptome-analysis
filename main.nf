@@ -1,7 +1,8 @@
 #!/usr/bin/env nextflow
 
 // ~~ Import processes ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ *
-include { DESEQ2 } from './subworkflows/local/deseq2'
+include { GENE_ANNOTATION } from './subworkflows/local/gene_annotation'
+include { DESEQ2          } from './subworkflows/local/deseq2'
 
 // ~~ printoout pipeline parameters functions ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ *
 
@@ -75,10 +76,22 @@ workflow {
         .fromPath("${params.quant_dir}/*/quant.sf", checkIfExists: true)
         .map { quant -> quant.parent }
 
-    // Optional gene annotation for the gene plots; [] when not given
-    ch_annotation = params.gene_annotation
-        ? channel.fromPath(params.gene_annotation, checkIfExists: true).collect()
-        : channel.value([])
+
+    // Gene annotation for the gene plots:
+    if (params.gene_annotation) {
+        // a provided table
+        ch_annotation = channel
+            .fromPath(params.gene_annotation, checkIfExists: true)
+            .collect()
+    }
+    else {
+        // fetched from Ensembl BioMart, w/ parameters:
+        // params.species
+        // params.ensembl_version
+        GENE_ANNOTATION(params.species, params.ensembl_version)
+        ch_annotation = GENE_ANNOTATION.out.annotation
+    }
+
 
     DESEQ2(ch_metadata, ch_tx2gene, ch_quant, ch_annotation)
 }

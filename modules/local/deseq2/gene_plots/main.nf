@@ -22,7 +22,7 @@ process DESEQ2_GENE_PLOTS {
     script:
     def args = task.ext.args ?: ''
     def anno = annotation ? "--annotation ${annotation}" : ''
-    def batch_size = task.ext.batch_size ?: 1000
+    def batch_size = task.ext.batch_size ?: 500
     prefix = task.ext.prefix ?: "${meta.id}"
     """
     # 1. Render one PDF per gene, in parallel, into ${prefix}_gene_plots/
