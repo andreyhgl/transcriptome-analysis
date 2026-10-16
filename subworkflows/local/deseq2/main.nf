@@ -10,10 +10,10 @@
  * analysis
  */
 
-include { QUANT_QC       } from '../../../modules/local/quant_qc'
-include { DESEQ2_DDS     } from '../../../modules/local/deseq2/dds'
-include { DESEQ2_RESULTS } from '../../../modules/local/deseq2/results'
-
+include { QUANT_QC          } from '../../../modules/local/quant_qc'
+include { DESEQ2_DDS        } from '../../../modules/local/deseq2/dds'
+include { DESEQ2_RESULTS    } from '../../../modules/local/deseq2/results'
+include { DESEQ2_GENE_PLOTS } from '../../../modules/local/deseq2/gene_plots'
 
 workflow DESEQ2 {
 
