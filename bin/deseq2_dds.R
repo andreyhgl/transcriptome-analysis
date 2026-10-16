@@ -126,10 +126,24 @@ prepare_metadata <- function(meta, design_cols) {
     stop("Column(s) missing from metadata: ", paste(missing, collapse = ", "))
   }
 
+  # Factor with "0" / "control" first (the reference level), then season_year
+  # levels in calendar order (winter first in a year), then any other levels
+  # in the order they first appear. NA stays NA.
   as_ordered_factor <- function(x) {
-    lvls <- unique(as.character(x))
+    lvls <- unique(as.character(x[!is.na(x)]))
     ref <- lvls[tolower(lvls) %in% c("0", "control")]
-    factor(x, levels = c(ref, setdiff(lvls, ref)))
+    other <- setdiff(lvls, ref)
+
+    season_rank <- c(winter = 1, spring = 2, summer = 3, fall = 4, autumn = 4)
+    pattern <- "^(winter|spring|summer|fall|autumn)_([0-9]{4})$"
+    is_dated <- grepl(pattern, tolower(other))
+
+    dated <- other[is_dated]
+    year <- as.integer(sub(pattern, "\\2", tolower(dated)))
+    season <- season_rank[sub(pattern, "\\1", tolower(dated))]
+    dated <- dated[order(year, season)]
+
+    factor(x, levels = c(ref, dated, other[!is_dated]))
   }
 
   meta[design_cols] <- lapply(meta[design_cols], as_ordered_factor)
