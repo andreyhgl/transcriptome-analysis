@@ -42,7 +42,6 @@ def paramsSummary(monochrome) {
     ${arrow} metadata                : ${col(c, 'green', params.metadata)}
 
     ${col(c, 'purple', '---- Ensembl Parameters ----------------------------------')}
-    ${arrow} Genome                  : ${col(c, 'cyan', params.ensembl_genome)}
     ${arrow} Version                 : ${col(c, 'cyan', params.ensembl_version)}
     ${arrow} Species                 : ${col(c, 'cyan', params.species)}
 
