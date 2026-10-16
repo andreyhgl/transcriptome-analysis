@@ -27,7 +27,7 @@ workflow GENE_ANNOTATION {
     }
 
     def org_id = organism.toString().toLowerCase().replaceAll(/[^a-z0-9]+/, '_')
-    def meta = [id: "${org_id}_ensembl${version ?: 'current'}_annotation"]
+    def meta = [id: "ensembl_${org_id}_v${version ?: 'current'}"]
 
     BIOMART_ANNOTATION(channel.of([meta, organism, version]))
     ch_versions = ch_versions.mix(BIOMART_ANNOTATION.out.versions)
