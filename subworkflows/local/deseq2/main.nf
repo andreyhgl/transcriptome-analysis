@@ -42,11 +42,17 @@ workflow DESEQ2 {
     DESEQ2_RESULTS(DESEQ2_DDS.out.rds)
     ch_versions = ch_versions.mix(DESEQ2_RESULTS.out.versions.first())
 
+    ch_plot_input = DESEQ2_DDS.out.rds.join(DESEQ2_RESULTS.out.results)
+
+    DESEQ2_GENE_PLOTS(ch_plot_input, ch_annotation)
+    ch_versions = ch_versions.mix(DESEQ2_GENE_PLOTS.out.versions.first())
+
     emit:
-    qc_pca     = QUANT_QC.out.pca            // channel: [ meta, pdf ]
-    qc_samples = QUANT_QC.out.samples        // channel: [ meta, tsv ]
-    rds        = DESEQ2_DDS.out.rds          // channel: [ meta, Rds ]
-    results    = DESEQ2_RESULTS.out.results  // channel: [ meta, [ tsv ] ]
-    summary    = DESEQ2_RESULTS.out.summary  // channel: [ meta, tsv ]
-    versions   = ch_versions                 // channel: [ versions.yml ]
+    qc_pca     = QUANT_QC.out.pca             // channel: [ meta, pdf ]
+    qc_samples = QUANT_QC.out.samples         // channel: [ meta, tsv ]
+    rds        = DESEQ2_DDS.out.rds           // channel: [ meta, Rds ]
+    results    = DESEQ2_RESULTS.out.results   // channel: [ meta, [ tsv ] ]
+    summary    = DESEQ2_RESULTS.out.summary   // channel: [ meta, tsv ]
+    gene_plots = DESEQ2_GENE_PLOTS.out.plots  // channel: [ meta, dir ]
+    versions   = ch_versions                  // channel: [ versions.yml ]
 }

@@ -7,4 +7,6 @@ dependencies:
   - bioconda::bioconductor-tximport
   - conda-forge::r-base
   - conda-forge::r-gtools
-  - conda-forge::r-scales
+  - conda-forge::r-ggplot2
+  - conda-forge::r-ggrepel
+  - conda-forge::r-ggsignif

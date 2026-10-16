@@ -70,5 +70,10 @@ workflow {
         .fromPath("${params.quant_dir}/*/quant.sf", checkIfExists: true)
         .map { quant -> quant.parent }
 
-    DESEQ2(ch_metadata, ch_tx2gene, ch_quant)
+    // Optional gene annotation for the gene plots; [] when not given
+    ch_annotation = params.gene_annotation
+        ? channel.fromPath(params.gene_annotation, checkIfExists: true).collect()
+        : channel.value([])
+
+    DESEQ2(ch_metadata, ch_tx2gene, ch_quant, ch_annotation)
 }
