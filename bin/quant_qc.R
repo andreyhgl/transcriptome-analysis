@@ -29,7 +29,7 @@
 # > Rscript quant_qc.R --fill group --ntop 1000 --filename quant_qc
 #
 # Container:
-# > docker://ghcr.io/andreyhgl/deseq2:main
+# > docker://ghcr.io/andreyhgl/deseq2-env:main
 #==============================================================================
 
 

@@ -28,7 +28,7 @@
 # > biomart_annotation.R --organism mouse --version 113 --filename anno
 #
 # Container:
-# > quay.io/biocontainers/bioconductor-biomart:2.68.0--r45hdfd78af_0
+# > docker://quay.io/biocontainers/bioconductor-biomart:2.68.0--r45hdfd78af_0
 #==============================================================================
 
 

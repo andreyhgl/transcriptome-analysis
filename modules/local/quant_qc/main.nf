@@ -4,8 +4,8 @@ process QUANT_QC {
 
     conda "${moduleDir}/environment.yml"
     container "${workflow.containerEngine == 'singularity' ?
-        'docker://ghcr.io/andreyhgl/deseq2:main' :
-        'ghcr.io/andreyhgl/deseq2:main'}"
+        'docker://ghcr.io/andreyhgl/deseq2-env:main' :
+        'ghcr.io/andreyhgl/deseq2-env:main'}"
 
     input:
     tuple val(meta), path(metadata), path(tx2gene), path(quant, stageAs: 'quant/*')
