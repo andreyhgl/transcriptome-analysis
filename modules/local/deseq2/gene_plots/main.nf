@@ -28,7 +28,7 @@ process DESEQ2_GENE_PLOTS {
     # 1. Render one PDF per gene, in parallel, into ${prefix}_gene_plots/
     deseq2_gene_plots.R \\
         --dds ${rds} \\
-        --results_dir results \\
+        --tsv_dir results \\
         --filename ${prefix} \\
         --cores ${task.cpus} \\
         ${anno} \\
