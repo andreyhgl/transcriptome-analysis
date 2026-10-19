@@ -27,7 +27,7 @@
 # > Rscript deseq2_dds.R --design batch,id
 #
 # Container:
-# > docker://ghcr.io/andreyhgl/deseq2:main
+# > docker://ghcr.io/andreyhgl/deseq2-env:main
 #==============================================================================
 
 

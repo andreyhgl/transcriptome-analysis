@@ -27,7 +27,7 @@
 # > Rscript deseq2_gene_plots.R --annotation genes.tsv --top_n 0 --cores 4
 #
 # Container:
-# > docker://ghcr.io/andreyhgl/deseq2:main
+# > docker://ghcr.io/andreyhgl/deseq2-env:main
 #==============================================================================
 
 
