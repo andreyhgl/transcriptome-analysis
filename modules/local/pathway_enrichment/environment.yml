@@ -1,0 +1,11 @@
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - bioconda::bioconductor-annotationdbi
+  - bioconda::bioconductor-clusterprofiler
+  - bioconda::bioconductor-org.hs.eg.db
+  - bioconda::bioconductor-org.mm.eg.db
+  - bioconda::bioconductor-reactomepa
+  - conda-forge::r-base
+  - conda-forge::r-openxlsx

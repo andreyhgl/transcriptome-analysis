@@ -1,8 +1,10 @@
 #!/usr/bin/env nextflow
 
 // ~~ Import processes ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ *
-include { GENE_ANNOTATION } from './subworkflows/local/gene_annotation'
-include { DESEQ2          } from './subworkflows/local/deseq2'
+include { GENE_ANNOTATION    } from './subworkflows/local/gene_annotation'
+include { DESEQ2             } from './subworkflows/local/deseq2'
+include { PATHWAY_ENRICHMENT } from './subworkflows/local/pathway_enrichment'
+//include { QUARTO_REPORT } from './modules/local/quarto_report'
 
 // ~~ printoout pipeline parameters functions ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ *
 
@@ -75,10 +77,13 @@ workflow {
         .fromPath("${params.quant_dir}/*/quant.sf", checkIfExists: true)
         .map { quant -> quant.parent }
 
+    if (!(params.species in ['human', 'mouse'])) {
+        error "--species must be 'human' or 'mouse', not '${params.species}'"
+    }
 
     // Gene annotation for the gene plots:
     if (params.gene_annotation) {
-        // a provided table
+        // table included
         ch_annotation = channel
             .fromPath(params.gene_annotation, checkIfExists: true)
             .collect()
@@ -91,6 +96,16 @@ workflow {
         ch_annotation = GENE_ANNOTATION.out.annotation
     }
 
-
     DESEQ2(ch_metadata, ch_tx2gene, ch_quant, ch_annotation)
+    PATHWAY_ENRICHMENT(DESEQ2.out.results, ch_annotation)
+
+/*
+    QUARTO_REPORT(
+        DESEQ2.out.rds
+            .join(DESEQ2.out.results)
+            .join(DESEQ2.out.summary),
+        ch_annotation,
+        channel.fromPath("${projectDir}/assets/quarto_report/*", checkIfExists: true).collect()
+    )
+*/
 }
