@@ -23,6 +23,9 @@ process BIOMART_ANNOTATION {
     def release = version ? "--version ${version}" : ''
     prefix = task.ext.prefix ?: "${meta.id}"
     """
+    # set environment variables for biomart cache
+    export BIOMART_CACHE="./biomart_cache/"
+    
     biomart_annotation.R \\
         --organism '${organism}' \\
         ${release} \\
