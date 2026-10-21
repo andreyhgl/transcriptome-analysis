@@ -1,0 +1,1026 @@
+---
+title: "Transcriptome Analysis"
+subtitle: "RNA-seq, differential gene expression"
+
+params:
+  # folder with the inputs below; relative paths are resolved against it
+  data_dir: "analysis/deseq2"
+  dds: "dds.Rds"
+  results_dir: "analysis/deseq2/results"
+  summary: "dds_summary.tsv"
+  annotation: "analysis/annotation/ensembl_human_v115.tsv"
+  enrichment_dir: "analysis/pathway_enrichment"
+  # adjusted p-value cut-off; 0 = use the alpha from DESEQ2_RESULTS
+  alpha: 0
+  export_fig: false
+---
+
+```{r load-libraries}
+suppressPackageStartupMessages({
+  library(DESeq2)
+  library(ggvenn)
+  library(ggplot2)
+  library(patchwork)
+  library(ggrepel)
+  library(scales)
+  library(dplyr)
+  library(tidyr)
+  library(reactable)
+})
+```
+
+```{r dummy-tbl}
+#| include: false
+
+# workaround
+# reactable is not generating any tables when executed inside a code chunk
+# w/ output: asis, unless reactable() was called in a regular code chunk
+reactable(data.frame(x = character()))
+```
+
+```{r import-datasets}
+# Local preview, with the published DESeq2 outputs in one folder:
+# quarto preview transcriptome_report.qmd -P data_dir:<outdir>/deseq2
+resolve <- function(x) {
+  if (file.exists(x)) x else file.path(params$data_dir, x)
+}
+
+dds <- readRDS(resolve(params$dds))
+summ <- read.delim(resolve(params$summary))
+
+# Variable of interest: the last column of the design, as in DESEQ2_RESULTS
+group_var <- tail(all.vars(design(dds)), 1)
+lvls <- levels(dds[[group_var]])
+ref <- lvls[1]
+contrasts <- lvls[-1]
+
+# One DESEQ2_RESULTS table per contrast: <prefix>_<level>_vs_<ref>.tsv
+read_results <- function(contrast, dir) {
+  files <- list.files(dir, pattern = "_vs_.*\\.tsv$", full.names = TRUE)
+  file <- files[endsWith(files, paste0("_", contrast, "_vs_", ref, ".tsv"))]
+  if (length(file) != 1) {
+    stop(
+      "Expected 1 results table for ", contrast, " vs ", ref, ", found ",
+      length(file), " in: ", dir
+    )
+  }
+
+  tbl <- read.delim(file)
+  data.frame(
+    gene_id = tbl$gene_id,
+    contrast = contrast,
+    log2fc = tbl$log2FoldChange,
+    log2fc_shrunk = tbl$log2FoldChange_shrunk,
+    padj = tbl$padj
+  )
+}
+
+res <- do.call(
+  rbind,
+  lapply(contrasts, read_results, dir = resolve(params$results_dir))
+)
+
+if (params$annotation != "") {
+  path <- resolve(params$annotation)
+  sep <- if (grepl("\\.csv(\\.gz)?$", path)) "," else "\t"
+  anno <- read.delim(path, sep = sep)
+  anno <- anno[!duplicated(anno$gene_id), ]
+}
+
+# pathway_enrichment_ora.R: one Rds per contrast,
+# list(terms, stats, universe, settings)
+enr_dir <- resolve(params$enrichment_dir)
+enr_files <- list.files(enr_dir, pattern = "\\.Rds$", full.names = TRUE)
+if (length(enr_files) == 0) stop("No enrichment Rds files in: ", enr_dir)
+
+enr <- lapply(enr_files, readRDS)
+is_enr <- vapply(enr, function(x) {
+  is.list(x) && all(c("terms", "stats", "universe", "settings") %in% names(x))
+}, logical(1))
+if (!all(is_enr)) {
+  stop(
+    "Not an enrichment Rds with terms, stats, universe and settings: ",
+    toString(basename(enr_files[!is_enr]))
+  )
+}
+
+# Enrichment contrast -> DESeq2 level: "DDS_summer_2022_vs_control" and
+# "summer_2022_vs_control" both give "summer_2022"; the longest level wins
+match_level <- function(x) {
+  ends_with_level <- vapply(contrasts, function(l) {
+    grepl(paste0("(^|_)", l, "_vs_", ref, "$"), x)
+  }, logical(1))
+  hit <- contrasts[x == contrasts | ends_with_level]
+  if (length(hit) == 0) {
+    stop(
+      "Enrichment contrast '", x, "' matches none of: ",
+      toString(contrasts)
+    )
+  }
+  hit[which.max(nchar(hit))]
+}
+enr_contrasts <- unique(unlist(lapply(enr, function(e) e$universe$contrast)))
+lvl_map <- setNames(vapply(enr_contrasts, match_level, ""), enr_contrasts)
+```
+
+```{r parameters}
+# adjusted p-value, the same as in DESEQ2_RESULTS unless set in params
+Q_CUT <- if (params$alpha > 0) params$alpha else summ$alpha[1]
+
+# genes listed in the "shared by all groups" table
+TOP_N <- 50
+
+# PCA: number of most variable genes, as in DESeq2::plotPCA() and QUANT_QC
+PCA_NTOP <- 500
+```
+
+```{r QoL-functions}
+has_ann <- function(x) !is.na(x) & nzchar(trimws(as.character(x)))
+
+pct <- function(n, d, digits = 1) {
+  sprintf(paste0("%.", digits, "f"), if (d == 0) 0 else 100 * n / d)
+}
+
+# "a", "a and b", "a, b and c"
+enum <- function(x) {
+  if (length(x) <= 1) return(x)
+  paste(paste(x[-length(x)], collapse = ", "), "and", x[length(x)])
+}
+
+# "summer_2022" -> "Summer 2022"
+label_group <- function(x) {
+  x <- gsub("_", " ", x)
+  paste0(toupper(substr(x, 1, 1)), substring(x, 2))
+}
+group_lab <- setNames(label_group(lvls), lvls)
+lab_fun <- function(x) unname(group_lab[x])
+
+# Gene symbol from the annotation, or the Ensembl ID without one
+gene_label <- function(id) {
+  if (is.null(anno) || !"gene_name" %in% colnames(anno)) return(id)
+  nm <- anno$gene_name[match(id, anno$gene_id)]
+  ifelse(has_ann(nm), nm, id)
+}
+
+# "1,234 (↑ 600 : ↓ 634)"
+fmt_dir <- function(x) {
+  paste0(
+    comma(length(x)),
+    " (↑ ", comma(sum(x == "Up")),
+    " : ↓ ", comma(sum(x == "Down")), ")"
+  )
+}
+
+#------------------------------------------------------------------------------
+# Export figures and captions from code chunks, to be included in manuscript
+# Extract name, size and other parameters to match the reports design/layout
+#------------------------------------------------------------------------------
+# Name defaults to the chunk label, size to the chunk's fig-width/fig-height.
+fig_opts <- function(name, width, height) {
+  list(
+    name = name %||% knitr::opts_current$get("label") %||% "figure",
+    width = width %||% knitr::opts_current$get("fig.width") %||% 7,
+    height = height %||% knitr::opts_current$get("fig.height") %||% 5
+  )
+}
+
+# Save the chunk's caption (and sub-captions)
+save_caption <- function(name) {
+  # A caption written as `!expr paste0(...)` comes back as an unevaluated
+  # expression, so evaluate it like knitr does for the rendered caption
+  as_text <- function(x) {
+    if (is.language(x) || is.expression(x)) {
+      x <- eval(x, envir = knitr::knit_global())
+    }
+    if (is.null(x)) NULL else as.character(unlist(x))
+  }
+  get_opt <- function(x) {
+    opt <- knitr::opts_current$get(x) %||%
+      knitr::opts_current$get(gsub(".", "-", x, fixed = TRUE))
+    as_text(opt)
+  }
+  cap <- get_opt("fig.cap") %||% get_opt("tbl.cap")
+  sub <- get_opt("fig.subcap")
+  if (is.null(cap) && is.null(sub)) return(invisible(NULL))
+
+  lines <- c(
+    cap,
+    if (length(sub)) paste0("(", letters[seq_along(sub)], ") ", sub)
+  )
+  writeLines(lines, paste0(name, "-caption.txt"))
+  invisible(NULL)
+}
+
+# for "regular" ggplot objects
+save_figure <- function(p, name = NULL, width = NULL, height = NULL) {
+  o <- fig_opts(name, width, height)
+  ggplot2::ggsave(
+    filename = paste0(o$name, ".pdf"),
+    plot = p,
+    width = o$width,
+    height = o$height,
+    device = grDevices::cairo_pdf
+  )
+  save_caption(o$name)
+}
+```
+
+```{r color-schema}
+# Same colours as QUANT_QC and DESEQ2_GENE_PLOTS: grey for the reference
+# level, then the palette in fixed order
+series_colours <- c(
+  "#2a78d6", "#eb6834", "#1baf7a", "#eda100",
+  "#e87ba4", "#008300", "#6250d6", "#e34948"
+)
+ref_colour <- "#898781"
+group_colours <- setNames(
+  c(ref_colour, series_colours[seq_along(contrasts)]),
+  lvls
+)
+
+# More than three non-reference groups also get one point shape each, as in
+# QUANT_QC: circle, triangle, square, diamond, down-triangle
+point_shapes <- c(21, 24, 22, 23, 25)
+use_shapes <- length(contrasts) > 3 && length(lvls) <= length(point_shapes)
+group_shapes <- setNames(
+  if (use_shapes) point_shapes[seq_along(lvls)] else rep(21, length(lvls)),
+  lvls
+)
+
+dir_colours <- c(Up = "#c0392b", Down = "#2c5f8a")
+```
+
+```{r significance-tbl}
+res$sign <- !is.na(res$padj) & res$padj < Q_CUT
+res$direction <- ifelse(res$log2fc > 0, "Up", "Down")
+sig <- res[res$sign, ]
+
+# Number of groups each DEG is significant in, and whether the direction is
+# the same in all of them
+n_groups <- tapply(sig$contrast, sig$gene_id, length)
+same_dir <- tapply(sig$direction, sig$gene_id, function(d) {
+  length(unique(d)) == 1
+})
+
+ids_unique <- names(n_groups)[n_groups == 1]
+ids_shared <- names(n_groups)[n_groups >= 2]
+ids_all <- names(n_groups)[n_groups == length(contrasts)]
+```
+
+```{r number-for-report}
+n_genes <- nrow(dds)
+n_union <- length(n_groups)
+n_shared <- length(ids_shared)
+n_shared_same <- sum(same_dir[ids_shared])
+n_all <- length(ids_all)
+n_all_same <- sum(same_dir[ids_all])
+
+# "1,234 in Summer 2022 (600 up, 634 down)"
+count_text <- function(ids = NULL) {
+  vapply(contrasts, function(x) {
+    s <- sig[sig$contrast == x, ]
+    if (!is.null(ids)) s <- s[s$gene_id %in% ids, ]
+    sprintf(
+      "%s in %s (%s up, %s down)",
+      comma(nrow(s)),
+      group_lab[[x]],
+      comma(sum(s$direction == "Up")),
+      comma(sum(s$direction == "Down"))
+    )
+  }, character(1))
+}
+```
+
+::: {.callout-note title="Method" collapse=true}
+
+<!-- TODO: describe the experiment: tissue, exposure, sampling per season -->
+
+Gene-level counts were imported from salmon quantifications with tximport and tested for differential expression with DESeq2. Each `r group_var` group was compared with `r ref` using the Wald test, and log~2~ fold changes were shrunk with apeglm. P-values were adjusted for multiple testing with the Benjamini–Hochberg method, and genes with an adjusted p-value < `r Q_CUT` were termed **D**ifferentially **E**xpressed **G**enes (***DEGs***). Counts of DEGs use the unshrunk fold change for the direction, the same as `DDS_summary.tsv`.
+
+```{r tbl-metadata_counts}
+#| tbl-cap: "Sample counts by group"
+
+as.data.frame(table(dds[[group_var]])) |>
+  setNames(c("Group", "N")) |>
+  mutate(Group = group_lab[as.character(Group)]) |>
+  knitr::kable(align = "lr", row.names = FALSE)
+```
+
+:::
+
+# Results
+
+## Sample clustering
+
+```{r pca}
+# vst() needs at least 1,000 genes for its subsample
+vsd <- if (nrow(dds) >= 1000) {
+  vst(dds, blind = TRUE)
+} else {
+  varianceStabilizingTransformation(dds, blind = TRUE)
+}
+
+pca <- plotPCA(
+  vsd,
+  intgroup = group_var,
+  ntop = PCA_NTOP,
+  returnData = TRUE
+)
+pct_var <- 100 * attr(pca, "percentVar")
+names(pca)[names(pca) == "name"] <- "sample"
+```
+
+The first two principal components of the `r comma(min(PCA_NTOP, n_genes))` most variable genes explain `r sprintf("%.1f", pct_var[1])` % and `r sprintf("%.1f", pct_var[2])` % of the variance, see @fig-pca.
+
+```{r fig-pca}
+#| fig-cap: !expr paste0("Principal component analysis of the variance-stabilised counts (vst, blind to the design) of the ", comma(min(PCA_NTOP, n_genes)), " most variable genes, after the gene filter of DESEQ2_DDS. Labels show the sample number.")
+#| fig-width: 7
+#| fig-height: 6
+
+p <- ggplot(
+  pca,
+  aes(PC1, PC2, fill = .data[[group_var]], shape = .data[[group_var]])
+) +
+  geom_point(size = 5, stroke = 0.5, alpha = 0.8) +
+  geom_text_repel(
+    aes(label = sample),
+    size = 3,
+    colour = "grey30",
+    max.overlaps = Inf,
+    seed = 1337
+  ) +
+  scale_fill_manual(values = group_colours, labels = lab_fun, name = NULL) +
+  scale_shape_manual(values = group_shapes, labels = lab_fun, name = NULL) +
+  labs(
+    x = sprintf("PC1 (%.1f%%)", pct_var[1]),
+    y = sprintf("PC2 (%.1f%%)", pct_var[2])
+  ) +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "bottom")
+
+print(p); if (params$export_fig) save_figure(p)
+```
+
+## Descriptive statistics
+
+This section presents numbers without any interpretation of the results. @tbl-summarytable shows the main results.
+
+```{r tbl-summarytable}
+#| tbl-cap: !expr paste0("Differentially expressed genes (padj < ", Q_CUT, ") per group, each compared with ", ref, ". ↑ up-regulated, ↓ down-regulated. Tested counts genes with an adjusted p-value, after DESeq2's independent filtering; for Any group it is the number of genes after the gene filter. Unique genes are significant in that group only; shared genes in at least one other group too, in either direction.")
+
+per_group <- lapply(contrasts, function(x) {
+  s <- res[res$contrast == x, ]
+  d <- s[s$sign, ]
+  uniq <- d$gene_id %in% ids_unique
+
+  data.frame(
+    Group = group_lab[[x]],
+    Tested = comma(sum(!is.na(s$padj))),
+    DEGs = fmt_dir(d$direction),
+    Unique = fmt_dir(d$direction[uniq]),
+    Shared = fmt_dir(d$direction[!uniq])
+  )
+})
+
+rbind(
+  do.call(rbind, per_group),
+  data.frame(
+    Group = "**Any group**",
+    Tested = comma(n_genes),
+    DEGs = comma(n_union),
+    Unique = comma(length(ids_unique)),
+    Shared = comma(n_shared)
+  )
+) |>
+  knitr::kable(align = "lrrrr", row.names = FALSE)
+```
+
+### Differentially expressed genes
+
+Of the `r comma(n_genes)` genes that passed the gene filter, `r enum(count_text())` passed the significance threshold (padj < `r Q_CUT`). In total, **`r comma(n_union)` unique DEGs** were found in at least one group.
+
+`r comma(length(ids_unique))` DEGs (`r pct(length(ids_unique), n_union)` %) were significant in one group only: `r enum(count_text(ids_unique))`. `r comma(n_shared)` DEGs (`r pct(n_shared, n_union)` %) were shared by at least two groups, and of these `r comma(n_shared_same)` (`r pct(n_shared_same, n_shared)` %) changed in the same direction in every group they were significant in. `r comma(n_all)` DEGs were significant in all `r length(contrasts)` groups, `r comma(n_all_same)` of them in the same direction (@fig-venn, @tbl-intersections).
+
+```{r venn-functions}
+# One set of gene IDs per group, for the given directions
+gene_sets <- function(dir = c("Up", "Down")) {
+  sets <- lapply(contrasts, function(x) {
+    unique(sig$gene_id[sig$contrast == x & sig$direction %in% dir])
+  })
+  names(sets) <- group_lab[contrasts]
+  sets
+}
+
+sets_all <- gene_sets()
+sets_up <- gene_sets("Up")
+sets_down <- gene_sets("Down")
+
+plot_venn <- function(sets, title) {
+  if (length(unlist(sets)) == 0) {
+    return(
+      ggplot() +
+        annotate("text", x = 0, y = 0, label = "No genes", size = 5) +
+        labs(title = title) +
+        theme_void() +
+        theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+    )
+  }
+
+  ggvenn(
+    sets,
+    fill_color = unname(group_colours[contrasts]),
+    fill_alpha = 0.5,
+    stroke_size = 0.6,
+    set_name_size = 4.5,
+    text_size = 4,
+    text_color = "black",
+    # 4 sets have 15 regions, too small for a percentage as well
+    show_percentage = length(sets) < 4,
+    digits = 1
+  ) +
+    labs(title = title) +
+    theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+}
+
+# Exclusive intersections: each gene counted once, in the exact combination
+# of groups it is in, as in the regions of a Venn diagram
+all_combos <- unlist(lapply(seq_along(contrasts), function(k) {
+  apply(combn(group_lab[contrasts], k), 2, paste, collapse = " & ")
+}))
+
+count_combos <- function(sets) {
+  ids <- unique(unlist(sets, use.names = FALSE))
+  if (length(ids) == 0) return(integer(length(all_combos)))
+
+  member <- matrix(
+    vapply(sets, function(s) ids %in% s, logical(length(ids))),
+    nrow = length(ids)
+  )
+  key <- apply(member, 1, function(m) {
+    paste(names(sets)[m], collapse = " & ")
+  })
+
+  as.integer(table(factor(key, levels = all_combos)))
+}
+```
+
+```{r fig-venn}
+#| eval: !expr length(contrasts) %in% 2:4
+#| fig-cap: !expr paste0("Differentially expressed genes (padj < ", Q_CUT, ") shared between groups, each compared with ", ref, ". (A) Both directions combined. (B) Up-regulated genes. (C) Down-regulated genes. A gene that is up in one group and down in another is shared in (A), but counted once in (B) and once in (C).")
+#| fig-width: 10
+#| fig-height: 11
+
+p_all <- plot_venn(sets_all, "All DEGs")
+p_up <- plot_venn(sets_up, "Up-regulated")
+p_down <- plot_venn(sets_down, "Down-regulated")
+
+# brackets: `+` binds tighter than `/`, the layout is for the whole figure
+p <- (p_all / (p_up | p_down)) +
+  plot_layout(heights = c(1.2, 1)) +
+  plot_annotation(tag_levels = "A")
+
+print(p); if (params$export_fig) save_figure(p)
+```
+
+```{r tbl-intersections}
+#| tbl-cap: "Differentially expressed genes by the exact combination of groups they are significant in. Each gene is counted once, so the numbers equal the regions of the Venn diagrams in @fig-venn: All = panel A, ↑ Up = panel B and ↓ Down = panel C. Groups shows how many groups are in the combination; Total is the number of genes in each panel."
+#| column: page-right
+
+tbl_int <- data.frame(
+  Combination = all_combos,
+  Groups = lengths(strsplit(all_combos, " & ", fixed = TRUE)),
+  All = count_combos(sets_all),
+  Up = count_combos(sets_up),
+  Down = count_combos(sets_down)
+)
+
+tot <- data.frame(
+  Combination = "**Total**",
+  Groups = "",
+  All = sum(tbl_int$All),
+  Up = sum(tbl_int$Up),
+  Down = sum(tbl_int$Down)
+)
+
+rbind(tbl_int, tot) |>
+  mutate(across(c(All, Up, Down), comma)) |>
+  knitr::kable(
+    col.names = c("Combination", "Groups", "All", "↑ Up", "↓ Down"),
+    align = "lrrrr",
+    row.names = FALSE
+  )
+```
+
+### Shared by all groups
+
+```{r}
+#| output: asis
+#| eval: !expr n_all == 0
+
+cat("No gene was significant in all", length(contrasts), "groups.\n")
+```
+
+```{r tbl-shared-all}
+#| eval: !expr n_all > 0
+#| tbl-cap: !expr paste0("Genes significant (padj < ", Q_CUT, ") in all ", length(contrasts), " groups, sorted by the largest adjusted p-value across the groups", if (n_all > TOP_N) paste0("; the ", TOP_N, " of ", comma(n_all), " genes with the smallest are shown") else "", ". Group columns show the apeglm-shrunken log2 fold change against ", ref, ".")
+#| column: page-right
+
+sig |>
+  filter(gene_id %in% ids_all) |>
+  group_by(gene_id) |>
+  mutate(max_padj = max(padj)) |>
+  ungroup() |>
+  mutate(
+    contrast = factor(group_lab[contrast], levels = group_lab[contrasts]),
+    lfc = sprintf("%.2f", log2fc_shrunk)
+  ) |>
+  select(gene_id, contrast, lfc, max_padj) |>
+  pivot_wider(names_from = contrast, values_from = lfc, names_sort = TRUE) |>
+  arrange(max_padj) |>
+  head(TOP_N) |>
+  mutate(
+    Gene = paste0("*", gene_label(gene_id), "*"),
+    max_padj = signif(max_padj, 3)
+  ) |>
+  select(
+    Gene,
+    all_of(unname(group_lab[contrasts])),
+    `Max. padj` = max_padj
+  ) |>
+  knitr::kable(
+    align = paste0("ll", strrep("r", length(contrasts) + 1)),
+    row.names = FALSE
+  )
+```
+
+## Pathway enrichment analysis
+
+```{r enrichment-setup}
+dirs <- c("Up", "Down", "Both")
+dir_lab <- c(
+  Up = "↑ Up-regulated",
+  Down = "↓ Down-regulated",
+  Both = "⇅ Both directions"
+)
+
+db_lab <- c(
+  GO_BP = "GO: Biological process",
+  GO_MF = "GO: Molecular function",
+  GO_CC = "GO: Cellular component",
+  KEGG = "KEGG",
+  Reactome = "Reactome"
+)
+db_short <- c(
+  GO_BP = "GO:BP",
+  GO_MF = "GO:MF",
+  GO_CC = "GO:CC",
+  KEGG = "KEGG",
+  Reactome = "Reactome"
+)
+
+# One part of every per-contrast Rds, as one table
+bind_part <- function(part) bind_rows(lapply(enr, `[[`, part))
+
+enr_cfg <- enr[[1]]$settings
+enr_stats <- bind_part("stats")
+enr_universe <- bind_part("universe")
+
+# "GO" in --databases stands for its three ontologies
+dbs <- names(db_lab)[sub("_.*$", "", names(db_lab)) %in% enr_cfg$databases]
+
+# "7/37" -> 0.189, so fold enrichment = GeneRatio / BgRatio
+ratio_num <- function(x) {
+  vapply(
+    strsplit(as.character(x), "/"),
+    function(z) as.numeric(z[1]) / as.numeric(z[2]),
+    numeric(1)
+  )
+}
+
+terms <- bind_part("terms") |>
+  mutate(
+    contrast = factor(lvl_map[contrast], levels = contrasts),
+    direction = factor(type, levels = dirs),
+    database = factor(
+      ifelse(database == "GO", paste0("GO_", ONTOLOGY), database),
+      levels = names(db_lab)
+    ),
+    fold = ratio_num(GeneRatio) / ratio_num(BgRatio)
+  )
+
+# Number of groups each term is enriched in, per database and direction
+any_season <- count(terms, database, direction, ID, name = "n_seasons")
+all_seasons <- any_season[any_season$n_seasons == length(contrasts), ]
+
+n_dir <- function(d, dir) sum(d$direction == dir)
+
+# "12 (↑ 8 : ↓ 3)": both directions, then the up- and down-regulated tests
+fmt_terms <- function(d) {
+  paste0(
+    comma(n_dir(d, "Both")),
+    " (↑ ", comma(n_dir(d, "Up")),
+    " : ↓ ", comma(n_dir(d, "Down")), ")"
+  )
+}
+
+# Share of the background with an Entrez ID, over the groups
+entrez_pct <- range(100 * enr_universe$entrez / enr_universe$genes)
+
+# Enriched terms per group, both directions
+n_terms_season <- vapply(contrasts, function(x) {
+  sum(terms$contrast == x & terms$direction == "Both")
+}, integer(1))
+enr_text <- enum(sprintf(
+  "%s in %s",
+  comma(n_terms_season),
+  group_lab[contrasts]
+))
+```
+
+::: {.callout-note title="Method" collapse=true}
+
+To investigate whether biological functions, processes or pathways were over-represented among the differentially expressed genes, we performed over-representation analysis (ORA) using the R-packages clusterProfiler (v`r enr_cfg$versions[["clusterProfiler"]]`; Wu et al., 2021) and ReactomePA (v`r enr_cfg$versions[["ReactomePA"]]`; Yu & He, 2016). Gene Ontology terms (biological process, molecular function and cellular component) were tested with the function "enrichGO", KEGG pathways with "enrichKEGG" and Reactome pathways with "enrichPathway"; the databases tested were `r enum(db_lab[dbs])`. ORA tests whether the gene list contains more members of a given gene set than expected by chance, using a one-sided hypergeometric test.
+
+Each group was tested three times: with its up-regulated DEGs, its down-regulated DEGs and both directions together (padj < `r enr_cfg$gene_alpha`). Testing the directions separately is more sensitive, since a pathway whose genes change in both directions is diluted when they are tested together ([Hong et al., 2014](https://doi.org/10.1098/rsif.2013.0950)). The background (universe) was all genes in that group's DESeq2 results table, i.e. the genes that passed the gene filter, rather than the whole genome, which would favour terms whose genes are simply expressed in the tissue ([Timmons et al., 2015](https://doi.org/10.1186/s13059-015-0761-7)).
+
+GO was tested with the Ensembl gene IDs; for KEGG and Reactome, the IDs were mapped to Entrez IDs with `r enr_cfg$orgdb` (v`r enr_cfg$versions[["orgdb"]]`), which `r sprintf("%.0f–%.0f", entrez_pct[1], entrez_pct[2])` % of the background had (@tbl-enrichment-sets). Gene sets of 10–500 genes were tested, clusterProfiler's default. P-values were adjusted for multiple testing using the Benjamini–Hochberg method, for GO over the three ontologies together, and terms with an adjusted p-value < `r enr_cfg$alpha` were considered significant. Terms supported by fewer than `r enr_cfg$min_count` genes from the input list were excluded.
+
+```{r tbl-enrichment-sets}
+#| tbl-cap: !expr paste0("Genes in the enrichment tests per group. The direction columns show the DEGs (padj < ", enr_cfg$gene_alpha, ") that were tested. Background is all genes in the group's results table, and Entrez the number of those with an Entrez ID, which KEGG and Reactome are tested with.")
+
+enr_stats |>
+  distinct(contrast, type, genes) |>
+  mutate(genes = comma(genes)) |>
+  pivot_wider(names_from = type, values_from = genes) |>
+  left_join(enr_universe, by = "contrast") |>
+  mutate(contrast = factor(lvl_map[contrast], levels = contrasts)) |>
+  arrange(contrast) |>
+  mutate(
+    contrast = unname(group_lab[as.character(contrast)]),
+    across(c(genes, entrez), comma)
+  ) |>
+  select(contrast, genes, entrez, all_of(dirs)) |>
+  knitr::kable(
+    col.names = c(
+      "Group", "Background", "Entrez", unname(dir_lab[dirs])
+    ),
+    align = "lrrrrr",
+    row.names = FALSE
+  )
+```
+
+:::
+
+Testing both directions together, the number of enriched terms (padj < `r enr_cfg$alpha`) was `r enr_text`. Across the groups, `r comma(n_dir(any_season, "Both"))` terms were enriched in at least one group and `r comma(n_dir(all_seasons, "Both"))` in all `r length(contrasts)`. Testing the directions separately, `r comma(n_dir(any_season, "Up"))` terms were enriched among up-regulated and `r comma(n_dir(any_season, "Down"))` among down-regulated DEGs in at least one group, of which `r comma(n_dir(all_seasons, "Up"))` and `r comma(n_dir(all_seasons, "Down"))`, respectively, in all groups (@tbl-enrichment-counts).
+
+```{r tbl-enrichment-counts}
+#| tbl-cap: !expr paste0("Enriched terms (padj < ", enr_cfg$alpha, ") per database and group. Each cell shows the terms enriched among the DEGs of both directions together, and in parentheses among the ↑ up- and ↓ down-regulated DEGs. The three are separate tests, so the up- and down-regulated terms do not add up to the first number. Any group counts each term once; All groups counts the terms enriched in every group.")
+#| column: page-right
+
+count_row <- function(db_sel, label) {
+  per_group <- lapply(contrasts, function(x) {
+    fmt_terms(terms[terms$database %in% db_sel & terms$contrast == x, ])
+  })
+  names(per_group) <- group_lab[contrasts]
+
+  data.frame(
+    Database = label,
+    per_group,
+    `Any group` = fmt_terms(any_season[any_season$database %in% db_sel, ]),
+    `All groups` = fmt_terms(all_seasons[all_seasons$database %in% db_sel, ]),
+    check.names = FALSE
+  )
+}
+
+rbind(
+  do.call(rbind, lapply(dbs, function(db) count_row(db, db_lab[[db]]))),
+  count_row(dbs, "**Total**")
+) |>
+  knitr::kable(
+    align = paste0("l", strrep("r", length(contrasts) + 2)),
+    row.names = FALSE
+  )
+```
+
+### Shared between groups
+
+The figures below compare the enriched terms across the groups, one tab per database. Each row is a term and each column a group, so a term enriched in every group has a point in every column; terms enriched in the most groups are at the top of each panel. The up- and down-regulated DEGs are shown in separate panels.
+
+```{r enrichment-dotplot-functions}
+# terms per group and direction in the dot plots
+TOP_TERMS <- 5
+
+wrap_text <- function(x, width = 55) {
+  vapply(
+    strwrap(x, width, simplify = FALSE),
+    paste,
+    character(1),
+    collapse = "\n"
+  )
+}
+
+# Top terms per group and direction, plus every other group they are
+# enriched in; one row per term and group
+dot_data <- function(db) {
+  d <- terms[terms$database == db & terms$direction != "Both", ]
+  if (nrow(d) == 0) return(d)
+
+  top <- d |>
+    group_by(contrast, direction) |>
+    slice_min(p.adjust, n = TOP_TERMS, with_ties = FALSE) |>
+    ungroup() |>
+    distinct(direction, ID)
+
+  d <- d |>
+    semi_join(top, by = c("direction", "ID")) |>
+    group_by(direction, ID) |>
+    mutate(n_groups = n(), best = min(p.adjust)) |>
+    ungroup() |>
+    arrange(direction, desc(n_groups), best) |>
+    mutate(
+      direction = droplevels(direction),
+      row = paste(direction, ID, sep = "|")
+    )
+
+  # first term at the top of each panel
+  d$row <- factor(d$row, levels = rev(unique(d$row)))
+  d
+}
+
+dot_list <- lapply(setNames(names(db_lab), names(db_lab)), dot_data)
+
+# Figure height from the number of label lines
+fig_h <- vapply(dot_list, function(d) {
+  if (nrow(d) == 0) return(2)
+  rows <- d[!duplicated(d$row), ]
+  n_lines <- sum(lengths(strsplit(wrap_text(rows$Description), "\n")))
+  max(3, 1.8 + 0.22 * n_lines)
+}, numeric(1))
+
+plot_dots <- function(db) {
+  d <- dot_list[[db]]
+  if (nrow(d) == 0) {
+    msg <- if (db %in% dbs) "No enriched terms" else "Not run"
+    return(
+      ggplot() +
+        annotate("text", x = 0, y = 0, label = msg, colour = "grey40") +
+        theme_void()
+    )
+  }
+
+  rows <- d[!duplicated(d$row), ]
+  y_lab <- setNames(wrap_text(rows$Description), as.character(rows$row))
+
+  ggplot(d, aes(contrast, row)) +
+    geom_point(
+      aes(size = fold, fill = -log10(p.adjust)),
+      shape = 21,
+      colour = "grey20",
+      stroke = 0.3
+    ) +
+    facet_grid(
+      direction ~ .,
+      scales = "free_y",
+      space = "free_y",
+      labeller = as_labeller(dir_lab)
+    ) +
+    scale_x_discrete(labels = lab_fun, drop = FALSE) +
+    scale_y_discrete(labels = y_lab) +
+    scale_size_continuous(range = c(2, 7), name = "Fold\nenrichment") +
+    # one-hue sequential ramp: light = least, dark = most significant
+    scale_fill_gradient(
+      low = "#b7d3f6",
+      high = "#0d366b",
+      name = expression(-log[10] ~ p.adj)
+    ) +
+    labs(x = NULL, y = NULL) +
+    theme_linedraw(base_size = 11) +
+    theme(
+      panel.grid.minor = element_blank(),
+      strip.text = element_text(face = "bold")
+    )
+}
+
+dot_cap <- function(db) {
+  paste0(
+    db_lab[[db]], " terms enriched among the up- (top) and down-regulated ",
+    "(bottom) DEGs of each group, compared with ", ref, ". The ", TOP_TERMS,
+    " terms with the smallest adjusted p-value per group and direction are ",
+    "shown, together with every other group the term is enriched in. Point ",
+    "size shows the fold enrichment (GeneRatio / BgRatio) and colour the ",
+    "adjusted p-value; no point means the term is not enriched in that group."
+  )
+}
+```
+
+::: {.panel-tabset .column-page-right}
+
+#### GO:BP
+
+```{r fig-enrich-go-bp}
+#| fig-cap: !expr dot_cap("GO_BP")
+#| fig-width: 10
+#| fig-height: !expr fig_h[["GO_BP"]]
+
+p <- plot_dots("GO_BP")
+print(p); if (params$export_fig) save_figure(p)
+```
+
+#### GO:MF
+
+```{r fig-enrich-go-mf}
+#| fig-cap: !expr dot_cap("GO_MF")
+#| fig-width: 10
+#| fig-height: !expr fig_h[["GO_MF"]]
+
+p <- plot_dots("GO_MF")
+print(p); if (params$export_fig) save_figure(p)
+```
+
+#### GO:CC
+
+```{r fig-enrich-go-cc}
+#| fig-cap: !expr dot_cap("GO_CC")
+#| fig-width: 10
+#| fig-height: !expr fig_h[["GO_CC"]]
+
+p <- plot_dots("GO_CC")
+print(p); if (params$export_fig) save_figure(p)
+```
+
+#### KEGG
+
+```{r fig-enrich-kegg}
+#| fig-cap: !expr dot_cap("KEGG")
+#| fig-width: 10
+#| fig-height: !expr fig_h[["KEGG"]]
+
+p <- plot_dots("KEGG")
+print(p); if (params$export_fig) save_figure(p)
+```
+
+#### Reactome
+
+```{r fig-enrich-reactome}
+#| fig-cap: !expr dot_cap("Reactome")
+#| fig-width: 10
+#| fig-height: !expr fig_h[["Reactome"]]
+
+p <- plot_dots("Reactome")
+print(p); if (params$export_fig) save_figure(p)
+```
+
+:::
+
+### Enriched terms per group
+
+::: {.callout-tip title="Interactive table"}
+The tables below have a drop-down menu which shows the genes included in the gene set, ranked by their shrunken log~2~ fold change. Click on the arrow ▶ on the left side of each row to reveal the genes. Gene names link to the corresponding [NCBI gene page](https://www.ncbi.nlm.nih.gov/gene/). The tooltip (appears when hovering) shows the log~2~ fold change of the gene in that group; red is up-regulated and blue down-regulated.
+:::
+
+```{r enrichment-table-functions}
+# Shrunken log2 fold change per gene, for one group
+lfc_lookup <- function(x) {
+  r <- res[res$contrast == x, ]
+  id <- sub("^(ENS[A-Z]*G[0-9]+)\\.[0-9]+$", "\\1", r$gene_id)
+  setNames(r$log2fc_shrunk, id)
+}
+
+# Gene symbols as Ensembl links, coloured by direction, sorted by log2FC
+gene_links <- function(ids, syms, lfc) {
+  v <- unname(lfc[ids])
+
+  tags <- lapply(order(v, decreasing = TRUE, na.last = TRUE), function(i) {
+    tip <- if (is.na(v[i])) "log2FC: NA" else sprintf("log2FC: %+.2f", v[i])
+    col <- if (is.na(v[i])) {
+      "#555"
+    } else if (v[i] > 0) {
+      dir_colours[["Up"]]
+    } else {
+      dir_colours[["Down"]]
+    }
+
+    htmltools::a(
+      syms[i],
+      href = paste0("https://www.ncbi.nlm.nih.gov/gene/?term=", ids[i]),
+      target = "_blank",
+      rel = "noopener",
+      title = tip,
+      style = sprintf("color:%s;", col)
+    )
+  })
+
+  # interleave ", " between the link tags
+  head(unlist(lapply(tags, list, ", "), recursive = FALSE), -1)
+}
+
+# dropdown filter over the databases
+source_filter <- function(values, name, tbl_id) {
+  js <- sprintf(
+    "Reactable.setFilter('%s', '%s', event.target.value || undefined)",
+    tbl_id,
+    name
+  )
+  options <- lapply(sort(unique(values)), function(v) {
+    htmltools::tags$option(value = v, v)
+  })
+
+  htmltools::tags$select(
+    onchange = js,
+    htmltools::tags$option(value = "", "All"),
+    options,
+    style = "width:100%; font-size:0.85em;"
+  )
+}
+
+enrichment_table <- function(x, dir) {
+  d <- terms[terms$contrast == x & terms$direction == dir, ]
+  d <- d[order(d$database, d$p.adjust), ]
+  d$source <- unname(db_short[as.character(d$database)])
+
+  lfc <- lfc_lookup(x)
+  tbl_id <- paste("enr", x, dir, sep = "-")
+  cols <- c("source", "Description", "ID", "Count", "fold", "p.adjust")
+
+  reactable(
+    as.data.frame(d[, cols]),
+    elementId = tbl_id,
+    columns = list(
+      source = colDef(
+        name = "Source",
+        maxWidth = 110,
+        filterInput = function(values, name) {
+          source_filter(values, name, tbl_id)
+        }
+      ),
+      Description = colDef(name = "Term", minWidth = 220),
+      ID = colDef(name = "Term ID", maxWidth = 150),
+      Count = colDef(maxWidth = 70),
+      fold = colDef(
+        name = "Fold",
+        maxWidth = 80,
+        format = colFormat(digits = 1)
+      ),
+      p.adjust = colDef(
+        name = "p.adj",
+        maxWidth = 90,
+        cell = function(value) signif(value, 3)
+      )
+    ),
+    filterable = TRUE,
+    defaultSorted = list(source = "asc", p.adjust = "asc"),
+    details = function(index) {
+      htmltools::div(
+        style = "padding: 8px 16px; font-size: 0.8em;",
+        htmltools::strong("Genes (sorted by shrunken log2 fold change): "),
+        gene_links(d$gene_id[[index]], d$gene_name[[index]], lfc)
+      )
+    },
+    defaultPageSize = 10,
+    striped = TRUE,
+    highlight = TRUE,
+    compact = TRUE,
+    theme = reactableTheme(cellPadding = "4px 6px")
+  )
+}
+
+# one tabset per group: up, down and both directions
+enrichment_tabs <- function(x) {
+  n <- table(factor(
+    as.character(terms$direction[terms$contrast == x]),
+    levels = dirs
+  ))
+
+  cat("\n::: {.panel-tabset}\n")
+  for (dir in dirs) {
+    cat(sprintf("\n##### %s (%d)\n\n", dir_lab[[dir]], n[[dir]]))
+    if (n[[dir]] == 0) {
+      cat("_No enriched terms._\n")
+    } else {
+      print(htmltools::tagList(enrichment_table(x, dir)))
+    }
+    cat("\n")
+  }
+  cat("\n:::\n")
+}
+```
+
+```{r pathway-enrichment-tables}
+#| output: asis
+#| column: page
+
+for (x in contrasts) {
+  cat("\n#### ", group_lab[[x]], "\n")
+  enrichment_tabs(x)
+}
+```
+
+---
+
+::: {.callout-note title="Session info" collapse=true}
+
+```{r sessioninfo}
+sessionInfo()
+```
+
+:::

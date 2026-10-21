@@ -4,7 +4,7 @@
 include { GENE_ANNOTATION    } from './subworkflows/local/gene_annotation'
 include { DESEQ2             } from './subworkflows/local/deseq2'
 include { PATHWAY_ENRICHMENT } from './subworkflows/local/pathway_enrichment'
-//include { QUARTO_REPORT } from './modules/local/quarto_report'
+include { QUARTO_REPORT      } from './modules/local/quarto_report'
 
 // ~~ printoout pipeline parameters functions ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ *
 
@@ -42,6 +42,10 @@ def paramsSummary(monochrome) {
     ${arrow} quant-files dir         : ${col(c, 'green', params.quant_dir)}
     ${arrow} tx2gene file            : ${col(c, 'green', params.tx2gene)}
     ${arrow} metadata                : ${col(c, 'green', params.metadata)}
+
+    ${arrow} Quarto report           : ${col(c, 'green', params.quarto_report_file)}
+    ${arrow} Quarto metadata         : ${col(c, 'green', params.quarto_meta_file)}
+    ${arrow} Quarto css              : ${col(c, 'green', params.quarto_css_file)}
 
     ${col(c, 'purple', '---- Ensembl Parameters ----------------------------------')}
     ${arrow} Version                 : ${col(c, 'cyan', params.ensembl_version)}
@@ -97,15 +101,17 @@ workflow {
     }
 
     DESEQ2(ch_metadata, ch_tx2gene, ch_quant, ch_annotation)
+
     PATHWAY_ENRICHMENT(DESEQ2.out.results, ch_annotation)
 
-/*
     QUARTO_REPORT(
         DESEQ2.out.rds
             .join(DESEQ2.out.results)
             .join(DESEQ2.out.summary),
         ch_annotation,
-        channel.fromPath("${projectDir}/assets/quarto_report/*", checkIfExists: true).collect()
+        PATHWAY_ENRICHMENT.out.rds.map { meta, rds -> rds }.collect(),
+        file(params.quarto_report_file, checkIfExists: true),
+        file(params.quarto_meta_file, checkIfExists: true),
+        file(params.quarto_css_file, checkIfExists: true)
     )
-*/
 }

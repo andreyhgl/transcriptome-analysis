@@ -1,0 +1,16 @@
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - bioconda::bioconductor-deseq2
+  - conda-forge::quarto
+  - conda-forge::r-base
+  - conda-forge::r-dplyr
+  - conda-forge::r-ggplot2
+  - conda-forge::r-ggrepel
+  - conda-forge::r-ggvenn
+  - conda-forge::r-knitr
+  - conda-forge::r-patchwork
+  - conda-forge::r-rmarkdown
+  - conda-forge::r-scales
+  - conda-forge::r-tidyr

@@ -4,21 +4,29 @@ Analysis pipeline, from quant-files => calculation of differential gene expressi
 
 The pipeline comes with some default parameters and will look inside folders `data/`, for metadata files and `results/` for quantification files, assuming the alignment and quantification has be performed with [nf-core/rnaseq](https://nf-co.re/rnaseq/latest) pipeline.
 
-```css
+```sh
 project/
-├── README.md
-├── bin/
-├── conf/
+├── assets/quarto_report/    # Quarto files contained within assets/
+│   ├── _quarto.yml
+│   ├── styles.css
+│   └── report.qmd
+│
+├── conf/                    # pipeline configs
 │   ├── base.config
 │   └── modules.config
+├── bin/                     # Mostly R-scripts
 ├── modules/
-├── subworkflows/
-│
-├── data/ 						# metadata for the project
-├── results/ 					# nf-core/rnaseq output
-│
+├── subworkflows/local/
+│   ├── deseq2/
+│   ├── gene_annotation/
+│   └── pathway_enrichment/
 ├── main.nf
-└── nextflow.config
+├── nextflow.config
+│
+├── data/                    # metadata for the project
+├── results/                 # nf-core/rnaseq output
+│
+└── README.md
 ```
 
 ## Metadata
@@ -60,15 +68,7 @@ Interactive quarto results report,
 
 # Run
 
-Analysis pipeline is initiated via `bin/run_analysis.sh`. All parameters are set via CLI upon pipeline start. The parameters come with defaults.
-
-To start pipeline:
-
-```sh
-bash bin/run_analysis.sh
-```
-
-Inside the script the nextflow pipeline is initiated:
+To start the pipeline:
 
 ```sh
 nextflow run andreyhgl/transcriptome_analysis \
@@ -78,14 +78,24 @@ nextflow run andreyhgl/transcriptome_analysis \
 	-bg
 ```
 
-Parameters are set (or default loaded) into `params.yml` and included in the pipeline:
+All parameters comes with defaults, set inside `nextflow.config`
 
-```yml
-# params.yml
-output: analysis
-quant_files_dir:
-ensembl_genome: human
-ensembl_version: 115
+```groovy
+params {
+    // Input
+    metadata  = 'data/metadata.csv'
+    tx2gene   = 'results/star_salmon/salmon.merged.tx2gene.tsv'
+    quant_dir = 'results/star_salmon'
+
+    ensembl_version = 115
+    species         = 'human'
+
+    // DESeq2
+    deseq2_design        = 'group'
+    deseq2_min_count     = 10
+    deseq2_max_zero_frac = 0.5
+    deseq2_alpha         = 0.05
+    deseq2_lfc_threshold = 0
 ```
 
 ## Environment

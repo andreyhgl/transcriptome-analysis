@@ -1,0 +1,11 @@
+p { 
+	text-align: justify;
+	font-size: 1.0rem;
+}
+
+/* left-align table and figure captions */
+.quarto-float-caption,
+figcaption,
+table > caption {
+  text-align: left;
+}
