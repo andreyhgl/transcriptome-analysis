@@ -6,7 +6,8 @@
 # Over-representation analysis of the significant genes of one DESeq2
 # contrast in GO, KEGG and Reactome. Up, Down and Both (up and down together)
 # are tested separately, against all genes in the results table as the
-# background (universe). One table per contrast, in Rds, TSV and Excel.
+# background (universe). One table per contrast, in TSV and Excel; the Rds
+# also holds the gene set sizes and settings, for the Quarto report.
 #
 # Input:
 #   - results table for one contrast from deseq2_results.R, with gene_id
@@ -481,8 +482,33 @@ print(summary_table(stats), row.names = FALSE)
 
 #---- Save files --------------------------------------------------------------
 
-# Rds keeps gene_name and gene_id as list columns
-saveRDS(out, file = out_rds)
+# Rds for the report: the terms (gene_name and gene_id as list columns), the
+# gene set sizes, the background and the settings of this run
+saveRDS(
+  list(
+    terms = out,
+    stats = data.frame(contrast = contrast, stats),
+    universe = data.frame(
+      contrast = contrast,
+      genes = nrow(universe),
+      entrez = sum(!is.na(universe$entrez))
+    ),
+    settings = list(
+      species = opt$species,
+      orgdb = sp$orgdb,
+      databases = unname(databases),
+      gene_alpha = opt$gene_alpha,
+      alpha = opt$alpha,
+      min_count = opt$min_count,
+      versions = c(
+        clusterProfiler = as.character(packageVersion("clusterProfiler")),
+        ReactomePA = as.character(packageVersion("ReactomePA")),
+        orgdb = as.character(packageVersion(sp$orgdb))
+      )
+    )
+  ),
+  file = out_rds
+)
 
 write.table(
   collapse_genes(out, "\n"),
