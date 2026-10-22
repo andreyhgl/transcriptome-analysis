@@ -2,7 +2,7 @@ Analysis pipeline, from quant-files => calculation of differential gene expressi
 
 # Computational pipeline
 
-The pipeline comes with some default parameters and will look inside folders `data/`, for metadata files and `results/` for quantification files, assuming the alignment and quantification has be performed with [nf-core/rnaseq](https://nf-co.re/rnaseq/latest) pipeline.
+The pipeline comes with some default parameters and will look inside folders `data/`, for metadata files and `results/` for quantification files, assuming the alignment and quantification has been performed with [nf-core/rnaseq](https://nf-co.re/rnaseq/latest) pipeline.
 
 ```sh
 project/
@@ -52,15 +52,15 @@ nextflow run andreyhgl/transcriptome-analysis \
 	--deseq2_design 'column-name' 
 ```
 
-## Diferrential gene expression
+## Differential gene expression
 
 ## Genomic annotation
 
-Categories genes according to their genomic positions and overlapping regulatory regions; transposable elements, enhancers, imprinted genes.
+Categorises genes according to their genomic positions and overlapping regulatory regions; transposable elements, enhancers, imprinted genes.
 
 ## Pathway analysis
 
-Over-representation analaysis. Comparison of genesets from gene ontology, Reactome, KEGG. (clusterProfiler, ReatcomePA).
+Over-representation analysis. Comparison of genesets from gene ontology, Reactome, KEGG. (clusterProfiler, ReactomePA).
 
 ## Report
 
@@ -71,9 +71,9 @@ Interactive quarto results report,
 To start the pipeline:
 
 ```sh
-nextflow run andreyhgl/transcriptome_analysis \
+nextflow run andreyhgl/transcriptome-analysis \
 	-profile apptainer \
-	-params params.yml \
+	-params-file params.yml \
 	-resume \
 	-bg
 ```
