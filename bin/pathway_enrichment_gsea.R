@@ -7,7 +7,9 @@
 # Reactome. All genes in the results table are ranked by one score (the Wald
 # statistic by default), with no significance cutoff. Terms enriched among
 # up-regulated genes get a positive NES, terms among down-regulated genes a
-# negative NES. One table per contrast, in Rds, TSV and Excel.
+# negative NES. One table per contrast, in TSV and Excel; the Rds also
+# holds the hits per database, the ranked genes and the settings, for the
+# Quarto report.
 #
 # Input:
 #   - results table for one contrast from deseq2_results.R, with gene_id
@@ -63,7 +65,7 @@ parse_args <- function(defaults, args = commandArgs(trailingOnly = TRUE)) {
 
 # Default
 defaults <- list(
-  prefix = "GSEA",
+  prefix = "gsea",
   results = "results.tsv",
   contrast = "",
   species = "human",
@@ -344,7 +346,10 @@ split_genes <- function(core, id_map) {
   })
 }
 
-# Enriched terms of the ranking in one database; NULL when there are none
+# Enriched terms of the ranking in one database (NULL when there are none),
+# with the number of ranked genes, the number of gene sets tested (sets
+# within --min_size and --max_size, which the BH adjustment runs over) and
+# the number of hits
 enrich <- function(database, ranking) {
   cat("   > Running", database, "analysis...\n")
 
@@ -359,11 +364,23 @@ enrich <- function(database, ranking) {
     KEGG = run_kegg(genes, sp$kegg),
     Reactome = run_reactome(genes, sp$reactome)
   )
+  tested <- nrow(res)
 
   if (nrow(res) > 0) res <- res[res$p.adjust < opt$alpha, ]
-  cat("     >", nrow(res), "hits\n")
+  cat("     >", nrow(res), "hits of", tested, "tested gene sets\n")
 
-  if (nrow(res) == 0) return(NULL)
+  out <- list(
+    terms = NULL,
+    stats = data.frame(
+      database = database,
+      ranked = length(genes),
+      hits = nrow(res),
+      up = sum(res$NES > 0),
+      down = sum(res$NES < 0),
+      tested = tested
+    )
+  )
+  if (nrow(res) == 0) return(out)
 
   res$gene_id <- split_genes(res$core_enrichment, gl$id_map)
   res$gene_name <- lapply(res$gene_id, function(ids) unname(name_map[ids]))
@@ -372,7 +389,8 @@ enrich <- function(database, ranking) {
   res$database <- database
   res$contrast <- contrast
 
-  res[order(res$p.adjust), columns]
+  out$terms <- res[order(res$p.adjust), columns]
+  out
 }
 
 # Output table with no rows, so that every output file is still written
@@ -446,24 +464,67 @@ cat(sprintf(" > %-12s : %s\n", "Databases", toString(databases)))
 
 print_section(sprintf("%s | GSEA", contrast))
 
-out <- lapply(databases, enrich, ranking = ranking)
-out <- do.call(rbind, out)
+enrichment <- lapply(databases, enrich, ranking = ranking)
+
+out <- do.call(rbind, lapply(enrichment, `[[`, "terms"))
 if (is.null(out)) out <- empty_table()
 
 out <- out[, columns]
 rownames(out) <- NULL
 
-print_section(sprintf("Enriched terms (p.adjust < %s)", opt$alpha))
-print(table(
-  direction = factor(out$direction, levels = c("Up", "Down")),
-  database = factor(out$database, levels = databases)
+stats <- do.call(rbind, lapply(enrichment, `[[`, "stats"))
+rownames(stats) <- NULL
+
+print_section(sprintf(
+  "Enriched gene sets (p.adjust < %s): hits / tested",
+  opt$alpha
 ))
+print(
+  data.frame(
+    database = stats$database,
+    ranked = stats$ranked,
+    up = stats$up,
+    down = stats$down,
+    hits = sprintf("%d / %d", stats$hits, stats$tested)
+  ),
+  row.names = FALSE
+)
 
 
 #---- Save files --------------------------------------------------------------
 
-# Rds keeps gene_name and gene_id as list columns
-saveRDS(out, file = out_rds)
+# Rds for the report, in the same layout as the ORA Rds: the terms
+# (gene_name and gene_id as list columns), the hits per database, the
+# ranked genes and the settings of this run
+saveRDS(
+  list(
+    terms = out,
+    stats = data.frame(contrast = contrast, stats),
+    universe = data.frame(
+      contrast = contrast,
+      genes = nrow(ranking),
+      entrez = sum(!is.na(ranking$entrez))
+    ),
+    settings = list(
+      method = "GSEA",
+      species = opt$species,
+      orgdb = sp$orgdb,
+      databases = unname(databases),
+      rank_by = opt$rank_by,
+      alpha = opt$alpha,
+      min_size = opt$min_size,
+      max_size = opt$max_size,
+      seed = opt$seed,
+      versions = c(
+        clusterProfiler = as.character(packageVersion("clusterProfiler")),
+        ReactomePA = as.character(packageVersion("ReactomePA")),
+        fgsea = as.character(packageVersion("fgsea")),
+        orgdb = as.character(packageVersion(sp$orgdb))
+      )
+    )
+  ),
+  file = out_rds
+)
 
 write.table(
   collapse_genes(out, "/"),

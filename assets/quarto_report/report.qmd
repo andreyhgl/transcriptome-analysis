@@ -87,22 +87,45 @@ if (params$annotation != "") {
   anno <- anno[!duplicated(anno$gene_id), ]
 }
 
-# pathway_enrichment_ora.R: one Rds per contrast,
-# list(terms, stats, universe, settings)
+# pathway_enrichment_ora.R and pathway_enrichment_gsea.R: one Rds per
+# contrast and method, list(terms, stats, universe, settings)
 enr_dir <- resolve(params$enrichment_dir)
 enr_files <- list.files(enr_dir, pattern = "\\.Rds$", full.names = TRUE)
-if (length(enr_files) == 0) stop("No enrichment Rds files in: ", enr_dir)
 
-enr <- lapply(enr_files, readRDS)
-is_enr <- vapply(enr, function(x) {
-  is.list(x) && all(c("terms", "stats", "universe", "settings") %in% names(x))
-}, logical(1))
-if (!all(is_enr)) {
-  stop(
-    "Not an enrichment Rds with terms, stats, universe and settings: ",
-    toString(basename(enr_files[!is_enr]))
+ora_files <- grep("_ora\\.Rds$", enr_files, value = TRUE)
+gsea_files <- grep("_gsea\\.Rds$", enr_files, value = TRUE)
+
+if (length(ora_files) == 0) {
+  stop("No ORA Rds files (*_ora.Rds) in: ", enr_dir)
+}
+
+other <- setdiff(enr_files, c(ora_files, gsea_files))
+if (length(other) > 0) {
+  warning(
+    "Ignored Rds files that are neither *_ora.Rds nor *_gsea.Rds: ",
+    toString(basename(other))
   )
 }
+
+# Read one method's Rds files and check their layout
+read_enrichment <- function(files) {
+  enr <- lapply(files, readRDS)
+  is_enr <- vapply(enr, function(x) {
+    is.list(x) &&
+      all(c("terms", "stats", "universe", "settings") %in% names(x))
+  }, logical(1))
+  if (!all(is_enr)) {
+    stop(
+      "Not an enrichment Rds with terms, stats, universe and settings: ",
+      toString(basename(files[!is_enr]))
+    )
+  }
+  enr
+}
+
+enr <- read_enrichment(ora_files)
+gsea <- read_enrichment(gsea_files)
+has_gsea <- length(gsea) > 0
 
 # Enrichment contrast -> DESeq2 level: "DDS_summer_2022_vs_control" and
 # "summer_2022_vs_control" both give "summer_2022"; the longest level wins
@@ -119,7 +142,11 @@ match_level <- function(x) {
   }
   hit[which.max(nchar(hit))]
 }
-enr_contrasts <- unique(unlist(lapply(enr, function(e) e$universe$contrast)))
+
+enr_contrasts <- c(enr, gsea) |>
+  lapply(function(e) e$universe$contrast) |>
+  unlist() |>
+  unique()
 lvl_map <- setNames(vapply(enr_contrasts, match_level, ""), enr_contrasts)
 ```
 
@@ -1014,6 +1041,446 @@ for (x in contrasts) {
   enrichment_tabs(x)
 }
 ```
+
+## Gene set enrichment analysis
+
+```{r gsea-setup}
+# Runs without GSEA results too, with empty tables, so that the inline code
+# below still works; the section is then hidden
+gsea_dirs <- c("Up", "Down")
+
+bind_gsea <- function(part) bind_rows(lapply(gsea, `[[`, part))
+
+gsea_cfg <- if (has_gsea) {
+  gsea[[1]]$settings
+} else {
+  list(
+    databases = character(0),
+    versions = c(clusterProfiler = "", ReactomePA = "", fgsea = "", orgdb = "")
+  )
+}
+
+gsea_dbs <- names(db_lab)[
+  sub("_.*$", "", names(db_lab)) %in% gsea_cfg$databases
+]
+
+rank_lab <- switch(
+  gsea_cfg$rank_by %||% "",
+  stat = "Wald statistic (`stat`)",
+  log2FoldChange_shrunk = "apeglm-shrunken log~2~ fold change",
+  log2FoldChange = "log~2~ fold change",
+  paste0("`", gsea_cfg$rank_by, "` column")
+)
+
+empty_gsea_terms <- function() {
+  d <- data.frame(
+    contrast = character(0),
+    direction = character(0),
+    database = character(0),
+    ONTOLOGY = character(0),
+    ID = character(0),
+    Description = character(0),
+    setSize = integer(0),
+    NES = numeric(0),
+    p.adjust = numeric(0),
+    Count = integer(0)
+  )
+  d$gene_name <- list()
+  d$gene_id <- list()
+  d
+}
+
+gsea_terms <- (if (has_gsea) bind_gsea("terms") else empty_gsea_terms()) |>
+  mutate(
+    contrast = factor(unname(lvl_map[contrast]), levels = contrasts),
+    direction = factor(direction, levels = gsea_dirs),
+    database = factor(
+      ifelse(database == "GO", paste0("GO_", ONTOLOGY), database),
+      levels = names(db_lab)
+    )
+  )
+
+gsea_stats <- if (has_gsea) {
+  bind_gsea("stats")
+} else {
+  data.frame(contrast = character(0), database = character(0))
+}
+gsea_universe <- if (has_gsea) {
+  bind_gsea("universe")
+} else {
+  data.frame(contrast = character(0), genes = integer(0), entrez = integer(0))
+}
+
+# "12 (↑ 8 : ↓ 4)": gene sets, then those with a positive and a negative NES.
+# A gene set enriched in opposite directions in two groups counts once in the
+# total but in both arrows
+fmt_gsea <- function(d) {
+  paste0(
+    comma(nrow(distinct(d, database, ID))),
+    " (↑ ", comma(nrow(distinct(d[d$direction == "Up", ], database, ID))),
+    " : ↓ ", comma(nrow(distinct(d[d$direction == "Down", ], database, ID))),
+    ")"
+  )
+}
+
+# Gene sets per group, any group, all groups in the same direction, and in
+# opposite directions in different groups
+n_gsea_group <- vapply(contrasts, function(x) {
+  sum(gsea_terms$contrast == x, na.rm = TRUE)
+}, integer(1))
+
+gsea_text <- enum(sprintf(
+  "%s in %s",
+  comma(n_gsea_group),
+  group_lab[contrasts]
+))
+
+gsea_any <- distinct(gsea_terms, database, ID, direction)
+gsea_all <- gsea_terms |>
+  count(database, ID, direction) |>
+  filter(n == length(contrasts))
+n_gsea_any <- nrow(distinct(gsea_any, database, ID))
+n_gsea_opposite <- gsea_any |>
+  count(database, ID) |>
+  filter(n > 1) |>
+  nrow()
+```
+
+```{r gsea-open}
+#| output: asis
+
+# The rest of the section sits in a div that is hidden without GSEA results
+if (has_gsea) {
+  cat("\n::: {.gsea-section}\n\n")
+} else {
+  cat(
+    "_GSEA was not run: no `*_gsea.Rds` files in the enrichment folder",
+    "(see `--enrichment_methods`)._\n\n::: {.hidden}\n\n"
+  )
+}
+```
+
+::: {.callout-note title="Method" collapse=true}
+
+Over-representation analysis only uses the genes that pass the DEG threshold. To find gene sets whose genes shift together, also when few of them are significant on their own, we also performed gene set enrichment analysis (GSEA; [Subramanian et al., 2005](https://doi.org/10.1073/pnas.0506580102)) with the clusterProfiler functions "gseGO" and "gseKEGG" and the ReactomePA function "gsePathway" (clusterProfiler v`r gsea_cfg$versions[["clusterProfiler"]]`, ReactomePA v`r gsea_cfg$versions[["ReactomePA"]]`), which use the fgsea algorithm (v`r gsea_cfg$versions[["fgsea"]]`; [Korotkevich et al., 2021](https://doi.org/10.1101/060012)); the databases tested were `r enum(db_lab[gsea_dbs])`.
+
+GSEA uses no significance cutoff. All genes in a group's DESeq2 results table were ranked by the `r rank_lab`, and each gene set was tested for whether its genes are concentrated at the top or the bottom of the ranking. A positive normalised enrichment score (NES) means that the gene set is enriched among up-regulated genes, a negative NES among down-regulated genes, so each group was tested once, with both directions in one test. The leading-edge genes, the genes that drive the enrichment score, are listed for each gene set.
+
+GO was tested with the Ensembl gene IDs; for KEGG and Reactome, the IDs were mapped to Entrez IDs with `r gsea_cfg$orgdb`, and when several genes mapped to the same Entrez ID, the gene with the largest absolute score was kept (@tbl-gsea-sets). Gene sets of `r gsea_cfg$min_size`–`r gsea_cfg$max_size` genes were tested. P-values were estimated with the adaptive multilevel method of fgsea, with a fixed random seed (`r gsea_cfg$seed`) so that reruns give the same result, and adjusted with the Benjamini–Hochberg method, for GO over the three ontologies together. Gene sets with an adjusted p-value < `r gsea_cfg$alpha` were considered significant.
+
+```{r tbl-gsea-sets}
+#| eval: !expr has_gsea
+#| tbl-cap: !expr paste0("Genes and gene sets in the GSEA per group. Ranked is the number of genes with a ", gsea_cfg$rank_by, " value, and Entrez the number of those with an Entrez ID, which KEGG and Reactome are tested with. The database columns show the gene sets tested (", gsea_cfg$min_size, "–", gsea_cfg$max_size, " genes); for GO, the three ontologies together.")
+
+gsea_stats |>
+  select(contrast, database, tested) |>
+  mutate(tested = comma(tested)) |>
+  pivot_wider(names_from = database, values_from = tested) |>
+  left_join(gsea_universe, by = "contrast") |>
+  mutate(contrast = factor(unname(lvl_map[contrast]), levels = contrasts)) |>
+  arrange(contrast) |>
+  mutate(
+    contrast = unname(group_lab[as.character(contrast)]),
+    across(c(genes, entrez), comma)
+  ) |>
+  select(contrast, genes, entrez, all_of(gsea_cfg$databases)) |>
+  knitr::kable(
+    col.names = c("Group", "Ranked", "Entrez", gsea_cfg$databases),
+    align = paste0("l", strrep("r", length(gsea_cfg$databases) + 2)),
+    row.names = FALSE
+  )
+```
+
+:::
+
+The number of enriched gene sets (padj < `r gsea_cfg$alpha`) was `r gsea_text`. Across the groups, `r comma(n_gsea_any)` gene sets were enriched in at least one group and `r comma(nrow(gsea_all))` in all `r length(contrasts)` in the same direction; `r comma(n_gsea_opposite)` were enriched in opposite directions in different groups (@tbl-gsea-counts).
+
+```{r tbl-gsea-counts}
+#| eval: !expr has_gsea
+#| tbl-cap: !expr paste0("Enriched gene sets (GSEA, padj < ", gsea_cfg$alpha, ") per database and group. Each cell shows the number of gene sets, and in parentheses those with a positive NES (↑, enriched among up-regulated genes) and a negative NES (↓, among down-regulated genes). Unlike the ORA counts, both directions come from one test, so within a group ↑ and ↓ add up to the first number. Any group counts each gene set once; a gene set enriched in opposite directions in two groups is counted under both arrows. All groups counts the gene sets enriched in every group in the same direction.")
+#| column: page-right
+
+gsea_count_row <- function(db_sel, label) {
+  per_group <- lapply(contrasts, function(x) {
+    fmt_gsea(
+      gsea_terms[gsea_terms$database %in% db_sel & gsea_terms$contrast == x, ]
+    )
+  })
+  names(per_group) <- group_lab[contrasts]
+
+  data.frame(
+    Database = label,
+    per_group,
+    `Any group` = fmt_gsea(gsea_any[gsea_any$database %in% db_sel, ]),
+    `All groups` = fmt_gsea(gsea_all[gsea_all$database %in% db_sel, ]),
+    check.names = FALSE
+  )
+}
+
+rbind(
+  do.call(
+    rbind,
+    lapply(gsea_dbs, function(db) gsea_count_row(db, db_lab[[db]]))
+  ),
+  gsea_count_row(gsea_dbs, "**Total**")
+) |>
+  knitr::kable(
+    align = paste0("l", strrep("r", length(contrasts) + 2)),
+    row.names = FALSE
+  )
+```
+
+### Shared between groups
+
+The figures below compare the enriched gene sets across the groups, one tab per database. Each row is a gene set and each column a group. Colour shows the NES, red for gene sets enriched among up-regulated and blue among down-regulated genes, so a gene set that changes direction between groups shows both colours in its row. Gene sets with the highest mean NES are at the top.
+
+```{r gsea-dotplot-functions}
+# Top gene sets per group and direction, plus every other group they are
+# enriched in; one row per gene set and group
+gsea_dot_data <- function(db) {
+  d <- gsea_terms[gsea_terms$database %in% db, ]
+  if (nrow(d) == 0) return(d)
+
+  top <- d |>
+    group_by(contrast, direction) |>
+    slice_min(p.adjust, n = TOP_TERMS, with_ties = FALSE) |>
+    ungroup() |>
+    distinct(ID)
+
+  d <- d |>
+    semi_join(top, by = "ID") |>
+    group_by(ID) |>
+    mutate(mean_nes = mean(NES)) |>
+    ungroup() |>
+    arrange(desc(mean_nes), p.adjust)
+
+  # highest mean NES at the top
+  d$ID <- factor(d$ID, levels = rev(unique(d$ID)))
+  d
+}
+
+gsea_dot_list <- lapply(setNames(names(db_lab), names(db_lab)), gsea_dot_data)
+
+# Figure height from the number of label lines
+gsea_fig_h <- vapply(gsea_dot_list, function(d) {
+  if (nrow(d) == 0) return(2)
+  rows <- d[!duplicated(d$ID), ]
+  n_lines <- sum(lengths(strsplit(wrap_text(rows$Description), "\n")))
+  max(3, 1.2 + 0.22 * n_lines)
+}, numeric(1))
+
+plot_gsea_dots <- function(db) {
+  d <- gsea_dot_list[[db]]
+  if (nrow(d) == 0) {
+    msg <- if (db %in% gsea_dbs) "No enriched gene sets" else "Not run"
+    return(
+      ggplot() +
+        annotate("text", x = 0, y = 0, label = msg, colour = "grey40") +
+        theme_void()
+    )
+  }
+
+  rows <- d[!duplicated(d$ID), ]
+  y_lab <- setNames(wrap_text(rows$Description), as.character(rows$ID))
+  nes_max <- max(abs(d$NES))
+
+  ggplot(d, aes(contrast, ID)) +
+    geom_point(
+      aes(size = -log10(p.adjust), fill = NES),
+      shape = 21,
+      colour = "grey20",
+      stroke = 0.3
+    ) +
+    scale_x_discrete(labels = lab_fun, drop = FALSE) +
+    scale_y_discrete(labels = y_lab) +
+    scale_size_continuous(
+      range = c(2, 7),
+      name = expression(-log[10] ~ p.adj)
+    ) +
+    # diverging: blue = down, neutral grey at 0, red = up
+    scale_fill_gradient2(
+      low = dir_colours[["Down"]],
+      mid = "#e6e6e3",
+      high = dir_colours[["Up"]],
+      midpoint = 0,
+      limits = c(-nes_max, nes_max),
+      name = "NES"
+    ) +
+    labs(x = NULL, y = NULL) +
+    theme_linedraw(base_size = 11) +
+    theme(panel.grid.minor = element_blank())
+}
+
+gsea_dot_cap <- function(db) {
+  paste0(
+    db_lab[[db]], " gene sets enriched in the GSEA of each group, compared ",
+    "with ", ref, ". The ", TOP_TERMS, " gene sets with the smallest ",
+    "adjusted p-value per group and direction are shown, together with every ",
+    "other group the gene set is enriched in. Colour shows the normalised ",
+    "enrichment score (NES; red = enriched among up-regulated, blue = among ",
+    "down-regulated genes) and point size the adjusted p-value; no point ",
+    "means the gene set is not enriched in that group."
+  )
+}
+```
+
+::: {.panel-tabset .column-page-right}
+
+#### GO:BP
+
+```{r fig-gsea-go-bp}
+#| eval: !expr has_gsea
+#| fig-cap: !expr gsea_dot_cap("GO_BP")
+#| fig-width: 10
+#| fig-height: !expr gsea_fig_h[["GO_BP"]]
+
+p <- plot_gsea_dots("GO_BP")
+print(p); if (params$export_fig) save_figure(p)
+```
+
+#### GO:MF
+
+```{r fig-gsea-go-mf}
+#| eval: !expr has_gsea
+#| fig-cap: !expr gsea_dot_cap("GO_MF")
+#| fig-width: 10
+#| fig-height: !expr gsea_fig_h[["GO_MF"]]
+
+p <- plot_gsea_dots("GO_MF")
+print(p); if (params$export_fig) save_figure(p)
+```
+
+#### GO:CC
+
+```{r fig-gsea-go-cc}
+#| eval: !expr has_gsea
+#| fig-cap: !expr gsea_dot_cap("GO_CC")
+#| fig-width: 10
+#| fig-height: !expr gsea_fig_h[["GO_CC"]]
+
+p <- plot_gsea_dots("GO_CC")
+print(p); if (params$export_fig) save_figure(p)
+```
+
+#### KEGG
+
+```{r fig-gsea-kegg}
+#| eval: !expr has_gsea
+#| fig-cap: !expr gsea_dot_cap("KEGG")
+#| fig-width: 10
+#| fig-height: !expr gsea_fig_h[["KEGG"]]
+
+p <- plot_gsea_dots("KEGG")
+print(p); if (params$export_fig) save_figure(p)
+```
+
+#### Reactome
+
+```{r fig-gsea-reactome}
+#| eval: !expr has_gsea
+#| fig-cap: !expr gsea_dot_cap("Reactome")
+#| fig-width: 10
+#| fig-height: !expr gsea_fig_h[["Reactome"]]
+
+p <- plot_gsea_dots("Reactome")
+print(p); if (params$export_fig) save_figure(p)
+```
+
+:::
+
+### Enriched gene sets per group
+
+::: {.callout-tip title="Interactive table"}
+As for ORA, click on the arrow ▶ on the left side of a row to show the leading-edge genes of the gene set, ranked by their shrunken log~2~ fold change. Gene names link to the [NCBI gene page](https://www.ncbi.nlm.nih.gov/gene/), and the tooltip shows the log~2~ fold change of the gene in that group. Size is the number of genes in the gene set and Core the number of leading-edge genes.
+:::
+
+```{r gsea-table-functions}
+gsea_table <- function(x, dir) {
+  d <- gsea_terms[gsea_terms$contrast == x & gsea_terms$direction == dir, ]
+  d <- d[order(d$database, d$p.adjust), ]
+  d$source <- unname(db_short[as.character(d$database)])
+
+  lfc <- lfc_lookup(x)
+  tbl_id <- paste("gsea", x, dir, sep = "-")
+  cols <- c(
+    "source", "Description", "ID", "setSize", "Count", "NES", "p.adjust"
+  )
+
+  reactable(
+    as.data.frame(d[, cols]),
+    elementId = tbl_id,
+    columns = list(
+      source = colDef(
+        name = "Source",
+        maxWidth = 110,
+        filterInput = function(values, name) {
+          source_filter(values, name, tbl_id)
+        }
+      ),
+      Description = colDef(name = "Gene set", minWidth = 220),
+      ID = colDef(name = "ID", maxWidth = 150),
+      setSize = colDef(name = "Size", maxWidth = 70),
+      Count = colDef(name = "Core", maxWidth = 70),
+      NES = colDef(maxWidth = 80, format = colFormat(digits = 2)),
+      p.adjust = colDef(
+        name = "p.adj",
+        maxWidth = 90,
+        cell = function(value) signif(value, 3)
+      )
+    ),
+    filterable = TRUE,
+    defaultSorted = list(source = "asc", p.adjust = "asc"),
+    details = function(index) {
+      htmltools::div(
+        style = "padding: 8px 16px; font-size: 0.8em;",
+        htmltools::strong(
+          "Leading-edge genes (sorted by shrunken log2 fold change): "
+        ),
+        gene_links(d$gene_id[[index]], d$gene_name[[index]], lfc)
+      )
+    },
+    defaultPageSize = 10,
+    striped = TRUE,
+    highlight = TRUE,
+    compact = TRUE,
+    theme = reactableTheme(cellPadding = "4px 6px")
+  )
+}
+
+# one tabset per group: positive and negative NES
+gsea_tabs <- function(x) {
+  n <- table(factor(
+    as.character(gsea_terms$direction[gsea_terms$contrast == x]),
+    levels = gsea_dirs
+  ))
+
+  cat("\n::: {.panel-tabset}\n")
+  for (dir in gsea_dirs) {
+    cat(sprintf("\n##### %s (%d)\n\n", dir_lab[[dir]], n[[dir]]))
+    if (n[[dir]] == 0) {
+      cat("_No enriched gene sets._\n")
+    } else {
+      print(htmltools::tagList(gsea_table(x, dir)))
+    }
+    cat("\n")
+  }
+  cat("\n:::\n")
+}
+```
+
+```{r gsea-tables}
+#| eval: !expr has_gsea
+#| output: asis
+#| column: page
+
+for (x in contrasts) {
+  cat("\n#### ", group_lab[[x]], "\n")
+  gsea_tabs(x)
+}
+```
+
+<!-- end of the div opened by gsea-open -->
+:::
 
 ---
 

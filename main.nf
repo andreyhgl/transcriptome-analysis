@@ -104,12 +104,18 @@ workflow {
 
     PATHWAY_ENRICHMENT(DESEQ2.out.results, ch_annotation)
 
+    // Pathway enrichment emits ORA and GSEA tables for every contrast
+    ch_enrichment = PATHWAY_ENRICHMENT.out.ora_rds
+        .mix(PATHWAY_ENRICHMENT.out.gsea_rds)
+        .map { meta, rds -> rds }
+        .toList()
+
     QUARTO_REPORT(
         DESEQ2.out.rds
             .join(DESEQ2.out.results)
             .join(DESEQ2.out.summary),
         ch_annotation,
-        PATHWAY_ENRICHMENT.out.rds.map { meta, rds -> rds }.collect(),
+        ch_enrichment,
         file(params.quarto_report_file, checkIfExists: true),
         file(params.quarto_meta_file, checkIfExists: true),
         file(params.quarto_css_file, checkIfExists: true)

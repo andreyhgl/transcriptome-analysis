@@ -494,6 +494,7 @@ saveRDS(
       entrez = sum(!is.na(universe$entrez))
     ),
     settings = list(
+      method = "ORA",
       species = opt$species,
       orgdb = sp$orgdb,
       databases = unname(databases),
