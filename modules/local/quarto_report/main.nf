@@ -1,6 +1,6 @@
 process QUARTO_REPORT {
     tag "${meta.id}"
-    label 'process_medium'
+    label 'process_heavy'
 
     conda "${moduleDir}/environment.yml"
     container "${workflow.containerEngine == 'singularity' ?
