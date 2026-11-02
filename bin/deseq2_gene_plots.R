@@ -64,7 +64,7 @@ defaults <- list(
   sample_prefix = "sperm_",
   alpha = 0.05,
   top_n = 20L,
-  include_label = FALSE,
+  gene_plots_labels = FALSE,
   cores = 1L
 )
 
@@ -303,7 +303,7 @@ make_gene_plot <- function(gene, dds, group, sig, anno) {
     theme_classic(base_size) +
     theme(legend.position = "none", panel.grid.minor = element_blank())
 
-  if (opt$include_label) {
+  if (opt$gene_plots_labels) {
     p <- p +
       geom_label_repel(
         size = 2.5,
