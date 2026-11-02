@@ -1,6 +1,6 @@
 process PATHWAY_ENRICHMENT_ORA {
     tag "${meta.id}"
-    label 'process_single'
+    label 'process_medium'
 
     conda "${moduleDir}/../environment.yml"
     container "${workflow.containerEngine == 'singularity' ?
@@ -9,7 +9,7 @@ process PATHWAY_ENRICHMENT_ORA {
 
     input:
     tuple val(meta), path(results)
-    path annotation
+    path annotation // optional: [] when no annotation table is given
 
     output:
     tuple val(meta), path("${prefix}.tsv"),  emit: tsv
@@ -26,8 +26,6 @@ process PATHWAY_ENRICHMENT_ORA {
     def anno = annotation ? "--annotation ${annotation}" : ''
     prefix = task.ext.prefix ?: "${meta.id}_ora"
     """
-    set -o pipefail
-
     pathway_enrichment_ora.R \\
         --results ${results} \\
         --contrast ${meta.contrast} \\

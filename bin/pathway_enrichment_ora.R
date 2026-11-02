@@ -58,7 +58,7 @@ parse_args <- function(defaults, args = commandArgs(trailingOnly = TRUE)) {
 
 # Default
 defaults <- list(
-  prefix = "enrichment",
+  prefix = "ORA",
   results = "results.tsv",
   contrast = "",
   species = "human",

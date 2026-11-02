@@ -3,7 +3,9 @@ channels:
   - bioconda
 dependencies:
   - bioconda::bioconductor-annotationdbi
+  - bioconda::bioconductor-biocparallel
   - bioconda::bioconductor-clusterprofiler
+  - bioconda::bioconductor-fgsea
   - bioconda::bioconductor-org.hs.eg.db
   - bioconda::bioconductor-org.mm.eg.db
   - bioconda::bioconductor-reactomepa
