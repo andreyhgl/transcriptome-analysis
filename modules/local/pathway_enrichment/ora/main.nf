@@ -28,7 +28,7 @@ process PATHWAY_ENRICHMENT_ORA {
     """
     set -o pipefail
 
-    pathway_enrichment.R \\
+    pathway_enrichment_ora.R \\
         --results ${results} \\
         --contrast ${meta.contrast} \\
         --prefix ${prefix} \\
