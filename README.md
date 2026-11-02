@@ -1,44 +1,65 @@
-Analysis pipeline, from quant-files => calculation of differential gene expression => gene annotation analysis => pathway analysis => report.
+# Analysis pipeline
+
++ Produce quant files
++ Calculate differential gene expression
++ Add annotation to genes
++ Pathway enrichment:
+  + ORA
+  + GSEA
 
 # Computational pipeline
 
-The pipeline comes with some default parameters and will look inside folders `data/`, for metadata files and `results/` for quantification files, assuming the alignment and quantification has been performed with [nf-core/rnaseq](https://nf-co.re/rnaseq/latest) pipeline.
+> [!IMPORTANT]
+> The pipeline loads with default parameters and looks inside folders `data/` and `results/` for metadata files and quantification files, respectively. Quantification files are generated with [nf-core/rnaseq](https://nf-co.re/rnaseq/latest) pipeline.
 
 ```sh
 project/
-├── assets/quarto_report/    # Quarto files contained within assets/
+├── assets/quarto_report/    #│ Quarto files contained within assets/
 │   ├── _quarto.yml
 │   ├── styles.css
 │   └── report.qmd
 │
-├── conf/                    # pipeline configs
+├── bin/                     #│ Mostly R-scripts
+│
+├── conf/                    #│ pipeline configs
 │   ├── base.config
 │   └── modules.config
-├── bin/                     # Mostly R-scripts
-├── modules/
-├── subworkflows/local/
-│   ├── deseq2/
-│   ├── gene_annotation/
-│   └── pathway_enrichment/
+│
+├── modules/local/           #│
+├── subworkflows/local/      #│
+│   ├── deseq2/              #│ Processes and workflows
+│   ├── gene_annotation/     #│
+│   └── pathway_enrichment/  #│
+│
 ├── main.nf
 ├── nextflow.config
 │
-├── data/                    # metadata for the project
-├── results/                 # nf-core/rnaseq output
+├── data/                    #│ contains metadata for the project
+├── results/                 #│ contains quantfiles, output from nf-core/rnaseq 
 │
 └── README.md
 ```
 
 ## Metadata
 
-The pipeline requires a metadata file with columns: `sample`. Pipeline defaults to `data/metadata.csv`, but can be manually set: `--metadata 'path/to/metadata.csv'`.
-
-The DESeq2 formula design is decided by a column name and is passed with `--deseq2_design 'column-name'`.
+The pipeline requires a metadata file with columns: `sample`. Pipeline defaults to path: `data/metadata.csv`, but can be manually set: `--metadata 'path/to/metadata.csv'`. The DESeq2 formula design is decided by a column name and is passed with `--deseq2_design 'column-name'`.
 
 ```sh
 nextflow run andreyhgl/transcriptome-analysis \
 	--metadata 'path/to/metadata.csv' \
 	--deseq2_design 'column-name'
+```
+
+```
+# metadata.csv
+
+sample,group,season,year,concentration
+1,control,control,NA,0
+2,winter,winter,2022,200
+3,spring,spring,2022,200
+4,summer,summer,2022,200
+5,autumn,autumn,2022,200
+6,winter,winter,2023,200
 ```
 
 ## Quantification files
