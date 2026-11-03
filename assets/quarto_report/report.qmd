@@ -4,11 +4,11 @@ subtitle: "RNA-seq, differential gene expression"
 
 params:
   # folder with the inputs below; relative paths are resolved against it
-  data_dir: "analysis/deseq2"
-  dds: "dds.Rds"
-  results_dir: "analysis/deseq2/results"
-  summary: "dds_summary.tsv"
-  annotation: "analysis/annotation/ensembl_human_v115.tsv"
+  data_dir: "analysis/"
+  dds: "deseq2/dds.Rds"
+  results_dir: "deseq2/results"
+  summary: "deseq2/results/dds_summary.tsv"
+  annotation: "annotation/ensembl_human_v115.tsv"
   enrichment_dir: "analysis/pathway_enrichment"
   # adjusted p-value cut-off; 0 = use the alpha from DESEQ2_RESULTS
   alpha: 0
@@ -1049,6 +1049,13 @@ for (x in contrasts) {
 # below still works; the section is then hidden
 gsea_dirs <- c("Up", "Down")
 
+# The HTML of every drop-down is built up front, so the tables keep the
+# report small enough for Quarto with at most this many gene sets per
+# database and table, and leading-edge genes per gene set. The TSV and Excel
+# files of PATHWAY_ENRICHMENT_GSEA have every gene set and gene
+GSEA_MAX_ROWS <- 100
+GSEA_MAX_GENES <- 50
+
 bind_gsea <- function(part) bind_rows(lapply(gsea, `[[`, part))
 
 gsea_cfg <- if (has_gsea) {
@@ -1391,13 +1398,28 @@ print(p); if (params$export_fig) save_figure(p)
 ### Enriched gene sets per group
 
 ::: {.callout-tip title="Interactive table"}
-As for ORA, click on the arrow ▶ on the left side of a row to show the leading-edge genes of the gene set, ranked by their shrunken log~2~ fold change. Gene names link to the [NCBI gene page](https://www.ncbi.nlm.nih.gov/gene/), and the tooltip shows the log~2~ fold change of the gene in that group. Size is the number of genes in the gene set and Core the number of leading-edge genes.
+As for ORA, click on the arrow ▶ on the left side of a row to show the leading-edge genes of the gene set, ranked by their shrunken log~2~ fold change. Gene names link to the [NCBI gene page](https://www.ncbi.nlm.nih.gov/gene/), and the tooltip shows the log~2~ fold change of the gene in that group. Size is the number of genes in the gene set and Core the number of leading-edge genes. To keep the report small, each table shows at most `r GSEA_MAX_ROWS` gene sets per database, and each drop-down at most `r GSEA_MAX_GENES` leading-edge genes; the TSV and Excel files from PATHWAY_ENRICHMENT_GSEA have them all.
 :::
 
 ```{r gsea-table-functions}
+# The genes with the largest absolute log2 fold change, at most n
+top_genes <- function(ids, lfc, n) {
+  if (length(ids) <= n) return(seq_along(ids))
+  head(order(abs(lfc[ids]), decreasing = TRUE, na.last = TRUE), n)
+}
+
+# Gene sets of one group and direction: the GSEA_MAX_ROWS with the smallest
+# adjusted p-value per database
+gsea_rows <- function(x, dir) {
+  gsea_terms[gsea_terms$contrast == x & gsea_terms$direction == dir, ] |>
+    group_by(database) |>
+    slice_min(p.adjust, n = GSEA_MAX_ROWS, with_ties = FALSE) |>
+    ungroup() |>
+    arrange(database, p.adjust)
+}
+
 gsea_table <- function(x, dir) {
-  d <- gsea_terms[gsea_terms$contrast == x & gsea_terms$direction == dir, ]
-  d <- d[order(d$database, d$p.adjust), ]
+  d <- gsea_rows(x, dir)
   d$source <- unname(db_short[as.character(d$database)])
 
   lfc <- lfc_lookup(x)
@@ -1431,12 +1453,31 @@ gsea_table <- function(x, dir) {
     filterable = TRUE,
     defaultSorted = list(source = "asc", p.adjust = "asc"),
     details = function(index) {
+      ids <- d$gene_id[[index]]
+      keep <- top_genes(ids, lfc, GSEA_MAX_GENES)
+      n_more <- length(ids) - length(keep)
+
       htmltools::div(
         style = "padding: 8px 16px; font-size: 0.8em;",
         htmltools::strong(
-          "Leading-edge genes (sorted by shrunken log2 fold change): "
+          if (n_more > 0) {
+            sprintf(
+              "Leading-edge genes, the %d of %d with the largest |log2FC| %s",
+              length(keep),
+              length(ids),
+              "(sorted by shrunken log2 fold change): "
+            )
+          } else {
+            "Leading-edge genes (sorted by shrunken log2 fold change): "
+          }
         ),
-        gene_links(d$gene_id[[index]], d$gene_name[[index]], lfc)
+        gene_links(ids[keep], d$gene_name[[index]][keep], lfc),
+        if (n_more > 0) {
+          htmltools::em(sprintf(
+            " … and %d more, see the GSEA TSV for the full list",
+            n_more
+          ))
+        }
       )
     },
     defaultPageSize = 10,
@@ -1460,6 +1501,18 @@ gsea_tabs <- function(x) {
     if (n[[dir]] == 0) {
       cat("_No enriched gene sets._\n")
     } else {
+      shown <- nrow(gsea_rows(x, dir))
+      if (shown < n[[dir]]) {
+        cat(sprintf(
+          paste0(
+            "_Showing %s of %s gene sets: the %d with the smallest ",
+            "adjusted p-value per database. All are in the GSEA TSV._\n\n"
+          ),
+          comma(shown),
+          comma(n[[dir]]),
+          GSEA_MAX_ROWS
+        ))
+      }
       print(htmltools::tagList(gsea_table(x, dir)))
     }
     cat("\n")

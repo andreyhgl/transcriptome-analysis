@@ -37,6 +37,9 @@ process QUARTO_REPORT {
     export XDG_CACHE_HOME="./cache/"
     export XDG_RUNTIME_DIR="./cache/"
 
+    # Give quarto extra memory
+    export QUARTO_DENO_V8_OPTIONS="--max-old-space-size=8192"
+
     # Everything is staged next to the .qmd, so the report finds its inputs
     # and pandoc its CSS and figures relative to the task directory
     quarto render ${quarto_report_file} \\
