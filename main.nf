@@ -1,6 +1,7 @@
 #!/usr/bin/env nextflow
 
 // ~~ Import processes ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ *
+include { SAMPLE_QC          } from './subworkflows/local/sample_qc'
 include { GENE_ANNOTATION    } from './subworkflows/local/gene_annotation'
 include { DESEQ2             } from './subworkflows/local/deseq2'
 include { PATHWAY_ENRICHMENT } from './subworkflows/local/pathway_enrichment'
@@ -100,9 +101,19 @@ workflow {
         ch_annotation = GENE_ANNOTATION.out.annotation
     }
 
-    DESEQ2(ch_metadata, ch_tx2gene, ch_quant, ch_annotation)
 
-    PATHWAY_ENRICHMENT(DESEQ2.out.results, ch_annotation)
+    SAMPLE_QC (
+        ch_quant,
+        ch_metadata,
+        ch_tx2gene,
+        file(params.sample_qc_report_file, checkIfExists: true),
+        file(params.quarto_meta_file, checkIfExists: true),
+        file(params.quarto_css_file, checkIfExists: true)
+    )
+
+    DESEQ2 ( ch_metadata, ch_tx2gene, ch_quant, ch_annotation )
+
+    PATHWAY_ENRICHMENT ( DESEQ2.out.results, ch_annotation )
 
     // Pathway enrichment emits ORA and GSEA tables for every contrast
     ch_enrichment = PATHWAY_ENRICHMENT.out.ora_rds
@@ -110,7 +121,7 @@ workflow {
         .map { meta, rds -> rds }
         .toList()
 
-    QUARTO_REPORT(
+    QUARTO_REPORT (
         DESEQ2.out.rds
             .join(DESEQ2.out.results)
             .join(DESEQ2.out.summary),
