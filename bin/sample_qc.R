@@ -34,7 +34,7 @@
 # Usage:
 # > Rscript sample_qc.R --metadata metadata.csv --tx2gene tx2gene.tsv \
 #     --quant_dir star_salmon
-# > Rscript sample_qc.R --sample_prefix sperm_ --columns id,season,year
+# > Rscript sample_qc.R --columns id,season,year
 #
 # Container:
 # > TODO: add container image
@@ -70,7 +70,6 @@ defaults <- list(
   tx2gene = "results/star_salmon/salmon.merged.tx2gene.tsv",
   quant_dir = "results/star_salmon/",
   sample_col = "sample",
-  sample_prefix = "",
   columns = "",
   ntop = 500L,
   min_count = 10L,
@@ -158,14 +157,12 @@ read_tx2gene <- function(path) {
 }
 
 # Metadata with a `sample` column that matches the quant folder names
-read_metadata <- function(path, sample_col, sample_prefix) {
+read_metadata <- function(path, sample_col) {
   meta <- read_table(path)
 
   if (!sample_col %in% colnames(meta)) {
     stop("Column '", sample_col, "' is missing from the metadata: ", path)
   }
-
-  meta$sample <- paste0(sample_prefix, meta[[sample_col]])
 
   dup <- unique(meta$sample[duplicated(meta$sample)])
   if (length(dup) > 0) stop("Duplicated samples in metadata: ", toString(dup))
@@ -459,7 +456,7 @@ metric_range <- function(x, digits = 0) {
 
 #---- Import datasets ---------------------------------------------------------
 
-meta <- read_metadata(opt$metadata, opt$sample_col, opt$sample_prefix)
+meta <- read_metadata(opt$metadata, opt$sample_col)
 tx2gene <- read_tx2gene(opt$tx2gene)
 files <- find_quant_files(opt$quant_dir)
 
@@ -474,7 +471,7 @@ files <- files[names(files) %in% meta$sample]
 if (length(files) < 3) {
   stop(
     "Sample QC needs at least 3 samples with metadata and a quant.sf, found ",
-    length(files), ". Check --sample_col and --sample_prefix: metadata has ",
+    length(files), ". Check --sample_col: metadata has ",
     toString(head(meta$sample, 3)), "; quant folders are ",
     toString(head(c(names(files), quant_only), 3))
   )
