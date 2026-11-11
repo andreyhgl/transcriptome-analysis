@@ -3,10 +3,8 @@ title: "Sample quality control"
 subtitle: "RNA-seq, before differential expression"
 
 params:
-  # output of sample_qc.R
-  qc: "sample_qc.Rds"
+  qc: "sample_qc.Rds"     # output of sample_qc.R
   # metadata column for the group axis and colours; "" = the first
-  # categorical column
   group: ""
   # every sample is labelled in the PCA up to this many samples; flagged
   # samples are always labelled
