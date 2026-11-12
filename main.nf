@@ -6,8 +6,12 @@ include { GENE_ANNOTATION    } from './subworkflows/local/gene_annotation'
 include { DESEQ2             } from './subworkflows/local/deseq2'
 include { PATHWAY_ENRICHMENT } from './subworkflows/local/pathway_enrichment'
 include { QUARTO_REPORT      } from './modules/local/quarto_report'
+include { paramsSummary; completionSummary } from './subworkflows/local/utils_pipeline'
 
-// ~~ printoout pipeline parameters functions ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ *
+
+// ~~ printout pipeline parameters functions ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ *
+
+
 
 params.monochrome_logs = false
 
@@ -72,10 +76,12 @@ def paramsSummary(monochrome) {
 workflow {
 
     main:
-    log.info(paramsSummary(params.monochrome_logs))
+    log.info(paramsSummary(params))
 
     ch_metadata = channel.fromPath(params.metadata, checkIfExists: true)
     ch_tx2gene  = channel.fromPath(params.tx2gene, checkIfExists: true)
+    ch_quarto_meta = file(params.quarto_meta_file, checkIfExists: true)
+    ch_quarto_css  = file(params.quarto_css_file, checkIfExists: true)
 
     // One directory per sample; the folder name is the sample id
     ch_quant = channel
@@ -101,15 +107,16 @@ workflow {
         ch_annotation = GENE_ANNOTATION.out.annotation
     }
 
-
-    SAMPLE_QC (
-        ch_quant,
-        ch_metadata,
-        ch_tx2gene,
-        file(params.sample_qc_report_file, checkIfExists: true),
-        file(params.quarto_meta_file, checkIfExists: true),
-        file(params.quarto_css_file, checkIfExists: true)
-    )
+    if (!params.skip_sample_qc) {
+        SAMPLE_QC (
+            ch_quant,
+            ch_metadata,
+            ch_tx2gene,
+            file(params.sample_qc_report_file, checkIfExists: true),
+            ch_quarto_meta,
+            ch_quarto_css
+        )
+    }
 
     DESEQ2 ( ch_metadata, ch_tx2gene, ch_quant, ch_annotation )
 
@@ -128,7 +135,10 @@ workflow {
         ch_annotation,
         ch_enrichment,
         file(params.quarto_report_file, checkIfExists: true),
-        file(params.quarto_meta_file, checkIfExists: true),
-        file(params.quarto_css_file, checkIfExists: true)
+        ch_quarto_meta,
+        ch_quarto_css
     )
+
+    onComplete:
+    log.info(completionSummary(params, workflow))
 }
