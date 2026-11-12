@@ -27,9 +27,10 @@
 #   --min_count reads in half of the samples; samples are clustered on
 #   1 - correlation with average linkage. Pairs of categorical columns are
 #   compared with Cramer's V. A sample is flagged when a metric is more than
-#   --mad median absolute deviations from the median, on the bad side only
-#   (low library size, mapping rate, detected genes or correlation; high
-#   share of reads in the 10 most abundant genes).
+#   --mad median absolute deviations, and at least a minimum difference
+#   (min_diff in Settings), from the median, on the bad side only (low
+#   library size, mapping rate, detected genes or correlation; high share
+#   of reads in the 10 most abundant genes).
 #
 # Usage:
 # > Rscript sample_qc.R --metadata metadata.csv --tx2gene tx2gene.tsv \
@@ -37,7 +38,7 @@
 # > Rscript sample_qc.R --columns id,season,year
 #
 # Container:
-# > TODO: add container image
+# > docker://ghcr.io/andreyhgl/deseq2-env:f070b01
 #==============================================================================
 
 
@@ -108,6 +109,17 @@ n_top_genes <- 10
 # Points of each sample's count density curve
 density_n <- 256
 
+# Smallest distance from the median that is flagged, whatever the MAD.
+# Keeps tight metrics (e.g. a mapping rate of 99.1 vs 99.5 %) from giving
+# trivial outliers. Units are those of the tested values.
+min_diff <- c(
+  library_size = log10(2), # half the median (tested on log10)
+  pct_mapped = 5,          # percentage points
+  detected_genes = 2000,
+  top10_pct = 5,           # percentage points
+  median_cor = 0.02
+)
+
 # Output files
 out_rds <- paste0(opt$prefix, ".Rds")
 out_table <- paste0(opt$prefix, "_samples.tsv")
@@ -164,6 +176,7 @@ read_metadata <- function(path, sample_col) {
     stop("Column '", sample_col, "' is missing from the metadata: ", path)
   }
 
+  meta$sample <- as.character(meta[[sample_col]])
   dup <- unique(meta$sample[duplicated(meta$sample)])
   if (length(dup) > 0) stop("Duplicated samples in metadata: ", toString(dup))
 
@@ -414,25 +427,32 @@ compare_columns <- function(meta, a, b) {
   )
 }
 
-# TRUE where x is more than k MADs from the median, on one side only
-is_outlier <- function(x, k, side = c("low", "high")) {
+# TRUE where x is more than k MADs, and at least min_diff, from the median,
+# on one side only
+is_outlier <- function(x, k, side = c("low", "high"), min_diff = 0) {
   side <- match.arg(side)
   centre <- median(x, na.rm = TRUE)
-  spread <- mad(x, na.rm = TRUE)
-  if (is.na(spread) || spread == 0) return(rep(FALSE, length(x)))
+  limit <- max(k * mad(x, na.rm = TRUE), min_diff, na.rm = TRUE)
+  if (limit == 0) return(rep(FALSE, length(x)))
 
-  out <- if (side == "low") x < centre - k * spread else x > centre + k * spread
+  dev <- if (side == "low") centre - x else x - centre
+  out <- dev > limit
   !is.na(out) & out
 }
 
 # "low library size, low correlation" per sample; "" when nothing is flagged
-flag_samples <- function(samples, k) {
+flag_samples <- function(samples, k, min_diff) {
+  test <- function(metric, side, x = samples[[metric]]) {
+    is_outlier(x, k, side, min_diff[[metric]])
+  }
+  log_lib <- log10(samples$library_size)
+
   checks <- list(
-    "low library size" = is_outlier(log10(samples$library_size), k, "low"),
-    "low mapping rate" = is_outlier(samples$pct_mapped, k, "low"),
-    "few detected genes" = is_outlier(samples$detected_genes, k, "low"),
-    "high top-10 share" = is_outlier(samples$top10_pct, k, "high"),
-    "low correlation" = is_outlier(samples$median_cor, k, "low")
+    "low library size" = test("library_size", "low", log_lib),
+    "low mapping rate" = test("pct_mapped", "low"),
+    "few detected genes" = test("detected_genes", "low"),
+    "high top-10 share" = test("top10_pct", "high"),
+    "low correlation" = test("median_cor", "low")
   )
 
   flagged <- do.call(cbind, checks)
@@ -545,7 +565,7 @@ samples <- data.frame(
   row.names = NULL,
   check.names = FALSE
 )
-samples$flags <- flag_samples(samples, opt$mad)
+samples$flags <- flag_samples(samples, opt$mad, min_diff)
 
 # Association of the PCs with the metadata and the technical metrics
 technical <- list(
@@ -669,7 +689,7 @@ if (nrow(confounding) == 0) {
 flagged <- samples[samples$flags != "", c("sample", "flags")]
 
 print_section(sprintf(
-  "Flagged samples (> %s MADs from the median)",
+  "Flagged samples (> %s MADs and min_diff from the median)",
   opt$mad
 ))
 if (nrow(flagged) == 0) {
@@ -687,6 +707,7 @@ saveRDS(
       columns = cols,
       sample_col = opt$sample_col,
       ntop = pca$n_genes,
+      min_diff = min_diff,
       min_count = opt$min_count,
       mad = opt$mad,
       versions = c(
