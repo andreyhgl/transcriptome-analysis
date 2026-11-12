@@ -1,4 +1,6 @@
-// ~~ Print pipeline parameters ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ *
+/*
+ * Pretty log summaries of pipeline parameters and completion
+*/
 
 // ANSI colour codes, or empty strings when colour is unwanted
 def ansiCodes(monochrome) {
@@ -120,7 +122,7 @@ def completionSummary(p, wf) {
         'Tasks'   : "${stats.succeededCount} succeeded, " +
                     "${stats.cachedCount} cached, " +
                     "${stats.failedCount} failed",
-        'Results' : p.outdir,
+        'Outdir'  : p.outdir,
         'Work dir': wf.workDir
     ]
     if (stats.ignoredCount > 0) {

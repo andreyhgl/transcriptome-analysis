@@ -4,8 +4,8 @@ process PATHWAY_ENRICHMENT_ORA {
 
     conda "${moduleDir}/../environment.yml"
     container "${workflow.containerEngine == 'singularity' ?
-        'docker://ghcr.io/andreyhgl/enrichment-env:main' :
-        'ghcr.io/andreyhgl/enrichment-env:main'}"
+        'docker://ghcr.io/andreyhgl/enrichment-env:c237546' :
+        'ghcr.io/andreyhgl/enrichment-env:c237546'}"
 
     input:
     tuple val(meta), path(results)
