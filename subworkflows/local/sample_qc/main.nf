@@ -12,12 +12,14 @@ include { SAMPLE_QC_DASHBOARD } from '../../../modules/local/sample_qc/dashboard
 workflow SAMPLE_QC {
 
     take:
-    ch_samples         // channel: path(sample dir with quant.sf), one item per sample
-    ch_metadata        // channel: path(metadata.csv)
-    ch_tx2gene         // channel: path(tx2gene.tsv)
-    quarto_report_file // path: sample_qc.qmd
-    quarto_meta_file   // path: Quarto metadata (format, theme, execute options)
-    quarto_css_file    // path: stylesheet
+    ch_samples            // channel: path(sample dir with quant.sf), one item per sample
+    ch_metadata           // channel: path(metadata.csv)
+    ch_tx2gene            // channel: path(tx2gene.tsv)
+    quarto_report_file    // path: sample_qc.qmd
+    quarto_meta_file      // path: Quarto metadata for the report (format: html)
+    quarto_dashboard_file // path: sample_qc_dashboard.qmd
+    quarto_dashboard_meta // path: Quarto metadata for the dashboard (format: dashboard)
+    quarto_css_file       // path: stylesheet, shared
 
     main:
     ch_versions = channel.empty()
