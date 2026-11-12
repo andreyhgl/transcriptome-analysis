@@ -154,7 +154,9 @@ theme_qc <- theme_linedraw(base_size = 12) +
 ncbi_link <- function(id, name) {
   id <- sub("^(ENS[A-Z]*G[0-9]+)\\.[0-9]+$", "\\1", id)
   name <- ifelse(is.na(name) | name == "", id, name)
-  sprintf("[*%s*](https://www.ncbi.nlm.nih.gov/gene/?term=%s)", name, id)
+  sprintf(
+    "[*%s*](https://www.ncbi.nlm.nih.gov/gene/?term=%s){target=\"_blank\"}",
+    name, id)
 }
 ```
 
