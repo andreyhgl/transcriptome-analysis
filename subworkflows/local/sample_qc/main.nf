@@ -7,6 +7,7 @@
 
 include { SAMPLE_QC_METRICS } from '../../../modules/local/sample_qc/metrics'
 include { SAMPLE_QC_REPORT  } from '../../../modules/local/sample_qc/report'
+include { SAMPLE_QC_DASHBOARD } from '../../../modules/local/sample_qc/dashboard'
 
 workflow SAMPLE_QC {
 
@@ -32,6 +33,15 @@ workflow SAMPLE_QC {
     SAMPLE_QC_METRICS ( ch_input )
     ch_versions = ch_versions.mix ( SAMPLE_QC_METRICS.out.versions.first() )
 
+    SAMPLE_QC_DASHBOARD (
+        SAMPLE_QC_METRICS.out.rds,
+        quarto_dashboard_file,
+        quarto_dashboard_meta,
+        quarto_css_file
+    )
+    ch_versions = ch_versions.mix ( SAMPLE_QC_DASHBOARD.out.versions.first() )
+
+
     SAMPLE_QC_REPORT (
         SAMPLE_QC_METRICS.out.rds,
         quarto_report_file,
@@ -41,9 +51,10 @@ workflow SAMPLE_QC {
     ch_versions = ch_versions.mix ( SAMPLE_QC_REPORT.out.versions.first() )
 
     emit:
-    qc_log   = SAMPLE_QC_METRICS.out.log     // channel: [ meta, log ]
-    report   = SAMPLE_QC_REPORT.out.html     // channel: [ meta, html ]
-    samples  = SAMPLE_QC_METRICS.out.samples // channel: [ meta, tsv ]
-    rds      = SAMPLE_QC_METRICS.out.rds     // channel: [ meta, Rds ]
-    versions = ch_versions                   // channel: [ versions.yml ]
+    qc_log    = SAMPLE_QC_METRICS.out.log      // channel: [ meta, log ]
+    report    = SAMPLE_QC_REPORT.out.html      // channel: [ meta, html ]
+    dashboard = SAMPLE_QC_DASHBOARD.out.html   // channel: [ meta, html ]
+    samples   = SAMPLE_QC_METRICS.out.samples  // channel: [ meta, tsv ]
+    rds       = SAMPLE_QC_METRICS.out.rds      // channel: [ meta, Rds ]
+    versions  = ch_versions                    // channel: [ versions.yml ]
 }

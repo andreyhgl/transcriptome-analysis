@@ -17,6 +17,7 @@ workflow {
     ch_metadata = channel.fromPath(params.metadata, checkIfExists: true)
     ch_tx2gene  = channel.fromPath(params.tx2gene, checkIfExists: true)
     ch_quarto_meta = file(params.quarto_meta_file, checkIfExists: true)
+    ch_sample_qc_meta = file(params.sample_qc_meta_file, checkIfExists: true)
     ch_quarto_css  = file(params.quarto_css_file, checkIfExists: true)
 
     // One directory per sample; the folder name is the sample id
@@ -50,6 +51,8 @@ workflow {
             ch_tx2gene,
             file(params.sample_qc_report_file, checkIfExists: true),
             ch_quarto_meta,
+            file(params.sample_qc_dashboard_file, checkIfExists: true),
+            file(params.sample_qc_dashboard_meta, checkIfExists: true),
             ch_quarto_css
         )
     }

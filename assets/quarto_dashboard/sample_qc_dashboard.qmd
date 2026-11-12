@@ -1,0 +1,925 @@
+---
+title: "Sample quality control"
+format:
+  dashboard:
+    orientation: rows
+    scrolling: true
+
+params:
+  qc: "sample_qc.Rds"     # output of sample_qc.R
+  # metadata column for the group axis and colours; "" = the first
+  group: ""
+  # every sample is labelled in the PCA up to this many samples; flagged
+  # samples are always labelled
+  max_labels: 30
+---
+
+```{r load-libraries}
+#| include: false
+suppressPackageStartupMessages({
+  library(ggplot2)
+  library(patchwork)
+  library(ggrepel)
+  library(scales)
+  library(reactable)
+})
+```
+
+```{r import-datasets}
+#| include: false
+# Local preview:
+# quarto preview sample_qc_dashboard.qmd \
+#   -P qc:<outdir>/sample_qc/sample_qc.Rds
+qc <- readRDS(params$qc)
+
+cfg <- qc$settings
+samples <- qc$samples
+samples$flagged <- samples$flags != ""
+samples$log10_library_size <- log10(samples$library_size)
+
+n_samples <- nrow(samples)
+n_flagged <- sum(samples$flagged)
+
+cat_cols <- qc$columns$column[qc$columns$type == "categorical"]
+num_cols <- qc$columns$column[qc$columns$type == "continuous"]
+```
+
+```{r color-schema}
+#| include: false
+# Same colours as the transcriptome report: grey for reference levels
+# (control, 0), then the palette in fixed order, never recycled
+series_colours <- c(
+  "#2a78d6", "#eb6834", "#1baf7a", "#eda100",
+  "#e87ba4", "#008300", "#6250d6", "#e34948"
+)
+ref_colour <- "#898781"
+na_colour <- "#c9c8c2"
+flag_colour <- "#fdf1e7"
+
+# one-hue sequential ramp: light = low, dark = high
+seq_low <- "#e6eefb"
+seq_high <- "#0d366b"
+
+# circle, triangle, square, diamond, down-triangle
+point_shapes <- c(21, 24, 22, 23, 25)
+
+is_ref <- function(lvls) tolower(lvls) %in% c("0", "control")
+is_series <- function(lvls) !is_ref(lvls) & lvls != "NA"
+
+level_colours <- function(x) {
+  lvls <- levels(x)
+  cols <- rep(ref_colour, length(lvls))
+  cols[lvls == "NA"] <- na_colour
+  cols[is_series(lvls)] <- series_colours[seq_len(sum(is_series(lvls)))]
+  setNames(cols, lvls)
+}
+
+# More than three non-reference levels also get one point shape each
+level_shapes <- function(x) {
+  lvls <- levels(x)
+  use <- sum(is_series(lvls)) > 3 && length(lvls) <= length(point_shapes)
+  shapes <- if (use) point_shapes[seq_along(lvls)] else rep(21, length(lvls))
+  setNames(shapes, lvls)
+}
+
+# Categorical columns with a colour for every level
+colourable <- cat_cols[vapply(cat_cols, function(col) {
+  sum(is_series(levels(samples[[col]]))) <= length(series_colours)
+}, logical(1))]
+plot_cols <- c(colourable, num_cols)
+```
+
+```{r group-column}
+#| include: false
+# The group on the x-axis of the metric plots and the colour of the lines,
+# with missing values as their own level
+samples$.all <- factor("All samples")
+
+group_col <- if (params$group != "") {
+  params$group
+} else if (length(colourable) > 0) {
+  colourable[1]
+} else {
+  ".all"
+}
+
+if (!group_col %in% c(colourable, ".all")) {
+  stop(
+    "params$group must be one of: ", toString(colourable), "; not '",
+    group_col, "'"
+  )
+}
+
+grp <- samples[[group_col]]
+if (anyNA(grp)) {
+  grp <- factor(
+    ifelse(is.na(grp), "NA", as.character(grp)),
+    levels = c(levels(grp), "NA")
+  )
+}
+samples$.group <- grp
+group_colours <- level_colours(grp)
+has_groups <- group_col != ".all"
+
+pca_cols <- if (length(plot_cols) > 0) plot_cols else ".all"
+pca_names <- ifelse(pca_cols == ".all", "All samples", pca_cols)
+```
+
+```{r QoL-functions}
+#| include: false
+# "a", "a and b", "a, b and c"
+enum <- function(x) {
+  if (length(x) <= 1) return(x)
+  paste(paste(x[-length(x)], collapse = ", "), "and", x[length(x)])
+}
+
+# A data frame as a markdown table, for chunks with output: asis
+cat_table <- function(d, ...) {
+  cat(knitr::kable(d, row.names = FALSE, ...), sep = "\n")
+  cat("\n")
+}
+
+# The variable with the largest R2 for one PC, as text
+best_assoc <- function(pc) {
+  a <- qc$pc_assoc[qc$pc_assoc$pc == pc & !is.na(qc$pc_assoc$r2), ]
+  if (nrow(a) == 0) return("no variable")
+  best <- a[which.max(a$r2), ]
+  sprintf("%s (R^2^ = %.2f)", best$variable, best$r2)
+}
+
+var_pct <- qc$pca$var_pct
+pc_names <- grep("^PC[0-9]+$", colnames(samples), value = TRUE)
+has_pc34 <- all(c("PC3", "PC4") %in% pc_names)
+
+# Label flagged samples, and every sample when there are few
+samples$label <- ifelse(
+  samples$flagged | n_samples <= params$max_labels,
+  samples$sample,
+  ""
+)
+
+theme_qc <- theme_linedraw(base_size = 12) +
+  theme(panel.grid.minor = element_blank())
+
+# Markdown link to the NCBI gene page, searched by the Ensembl ID without
+# its version; the ID is shown when there is no gene name
+ncbi_link <- function(id, name) {
+  id <- sub("^(ENS[A-Z]*G[0-9]+)\\.[0-9]+$", "\\1", id)
+  name <- ifelse(is.na(name) | name == "", id, name)
+  sprintf(
+    "[*%s*](https://www.ncbi.nlm.nih.gov/gene/?term=%s){target=\"_blank\"}",
+    name,
+    id
+  )
+}
+```
+
+```{r metric-data}
+#| include: false
+metric_lab <- c(
+  library_size = "Library size (million reads)",
+  pct_mapped = "Mapping rate (%)",
+  detected_genes = "Detected genes",
+  top10_pct = "Reads in the 10 most abundant genes (%)",
+  median_cor = "Median correlation with the other samples"
+)
+
+m <- samples
+m$library_size <- m$library_size / 1e6
+
+# Metrics that were measured, e.g. no mapping rate without meta_info.json
+metrics <- names(metric_lab)[vapply(names(metric_lab), function(k) {
+  !all(is.na(m[[k]]))
+}, logical(1))]
+
+# The same horizontal offset for a sample in every panel
+set.seed(1337)
+offset <- runif(n_samples, -0.18, 0.18)
+
+metric_long <- do.call(rbind, lapply(metrics, function(k) {
+  data.frame(
+    sample = m$sample,
+    group = m$.group,
+    x = as.numeric(m$.group) + offset,
+    flagged = m$flagged,
+    metric = metric_lab[[k]],
+    value = m[[k]]
+  )
+}))
+metric_long$metric <- factor(metric_long$metric, levels = metric_lab[metrics])
+
+metric_fig_h <- 1 + 2.8 * ceiling(length(metrics) / 2)
+
+# Technical metrics to colour the PCA by (library size on log10, as the
+# flags are tested)
+tech_lab <- c(
+  log10_library_size = "Library size (log10)",
+  pct_mapped = "Mapping rate (%)",
+  detected_genes = "Detected genes",
+  top10_pct = "Top-10 share (%)",
+  median_cor = "Median correlation"
+)
+tech_cols <- names(tech_lab)[vapply(names(tech_lab), function(k) {
+  !all(is.na(samples[[k]]))
+}, logical(1))]
+```
+
+```{r pca-functions}
+#| include: false
+# One PCA panel, filled by a metadata column or a technical metric
+pca_plot <- function(col, i, j, name = col) {
+  x <- paste0("PC", i)
+  y <- paste0("PC", j)
+  is_num <- is.numeric(samples[[col]])
+  legend_name <- if (col == ".all") NULL else name
+
+  p <- if (is_num) {
+    ggplot(samples, aes(.data[[x]], .data[[y]], fill = .data[[col]])) +
+      geom_point(
+        shape = 21,
+        size = 3.5,
+        stroke = 0.4,
+        colour = "grey20",
+        alpha = 0.85
+      ) +
+      scale_fill_gradient(
+        low = seq_low,
+        high = seq_high,
+        na.value = na_colour,
+        name = legend_name
+      )
+  } else {
+    ggplot(
+      samples,
+      aes(.data[[x]], .data[[y]], fill = .data[[col]], shape = .data[[col]])
+    ) +
+      geom_point(size = 3.5, stroke = 0.4, colour = "grey20", alpha = 0.85) +
+      scale_fill_manual(
+        values = level_colours(samples[[col]]),
+        na.value = na_colour,
+        name = legend_name
+      ) +
+      scale_shape_manual(
+        values = level_shapes(samples[[col]]),
+        na.value = 21,
+        name = legend_name
+      )
+  }
+
+  p +
+    geom_text_repel(
+      aes(.data[[x]], .data[[y]], label = label),
+      inherit.aes = FALSE,
+      size = 2.8,
+      colour = "grey30",
+      max.overlaps = Inf,
+      seed = 1337
+    ) +
+    labs(
+      x = sprintf("%s (%.1f%%)", x, var_pct[i]),
+      y = sprintf("%s (%.1f%%)", y, var_pct[j])
+    ) +
+    theme_qc +
+    theme(legend.position = if (col == ".all") "none" else "bottom")
+}
+
+# One panel per column, three per row
+pca_grid <- function(cols, names, i, j) {
+  plots <- lapply(seq_along(cols), function(k) {
+    pca_plot(cols[k], i, j, names[k]) + ggtitle(names[k])
+  })
+  wrap_plots(plots, ncol = min(3, length(plots)))
+}
+
+pca_fig_h <- 1 + 4.5 * ceiling(length(pca_cols) / 3)
+tech_fig_h <- 1 + 4.5 * ceiling(length(tech_cols) / 3)
+
+scree <- data.frame(
+  pc = factor(seq_along(var_pct), levels = seq_along(var_pct)),
+  var_pct = var_pct
+) |>
+  head(10)
+```
+
+```{r assoc-data}
+#| include: false
+assoc <- qc$pc_assoc[!is.na(qc$pc_assoc$r2), ]
+
+pc_index <- as.integer(sub("PC", "", assoc$pc))
+assoc$pc_lab <- sprintf("%s\n%.1f%%", assoc$pc, var_pct[pc_index])
+assoc$pc_lab <- factor(
+  assoc$pc_lab,
+  levels = unique(assoc$pc_lab[order(pc_index)])
+)
+assoc$variable <- factor(assoc$variable, levels = rev(unique(assoc$variable)))
+assoc$type <- factor(assoc$type, levels = c("metadata", "technical"))
+
+sig <- !is.na(assoc$padj) & assoc$padj < 0.05
+assoc$label <- paste0(sprintf("%.2f", assoc$r2), ifelse(sig, "*", ""))
+
+assoc_fig_h <- max(3, 1.6 + 0.4 * nlevels(assoc$variable))
+
+# Technical metrics that explain much of PC1 or PC2
+technical_pcs <- assoc[
+  assoc$type == "technical" & assoc$pc %in% c("PC1", "PC2") &
+    assoc$r2 >= 0.5 & sig,
+]
+```
+
+```{r confounding-setup}
+#| include: false
+conf <- qc$confounding
+conf <- conf[order(conf$cramers_v, decreasing = TRUE), ]
+
+# Pairs that a model cannot separate, or hardly
+is_confounded <- conf$nested != "" | conf$cramers_v >= 0.8
+conf_pairs <- paste(conf$column_1, conf$column_2, sep = " x ")[is_confounded]
+```
+
+```{r heatmap-data}
+#| include: false
+clust_order <- qc$clustering$labels[qc$clustering$order]
+show_names <- n_samples <= 50
+
+cor_long <- data.frame(
+  s1 = rep(rownames(qc$cor), times = ncol(qc$cor)),
+  s2 = rep(colnames(qc$cor), each = nrow(qc$cor)),
+  r = as.vector(qc$cor)
+)
+cor_long$s1 <- factor(cor_long$s1, levels = clust_order)
+cor_long$s2 <- factor(cor_long$s2, levels = rev(clust_order))
+
+# One annotation row above the heat map per metadata column, at most three
+strip_cols <- head(colourable, 3)
+
+strip_plot <- function(col) {
+  d <- data.frame(
+    sample = factor(samples$sample, levels = clust_order),
+    value = samples[[col]]
+  )
+
+  ggplot(d, aes(sample, 1, fill = value)) +
+    geom_raster() +
+    scale_fill_manual(
+      values = level_colours(samples[[col]]),
+      na.value = na_colour,
+      name = col
+    ) +
+    scale_x_discrete(expand = c(0, 0)) +
+    scale_y_continuous(breaks = 1, labels = col, expand = c(0, 0)) +
+    labs(x = NULL, y = NULL) +
+    theme_minimal(base_size = 10) +
+    theme(
+      axis.text.x = element_blank(),
+      axis.ticks = element_blank(),
+      panel.grid = element_blank()
+    )
+}
+```
+
+
+# Overview
+
+## Row {height="140px"}
+
+```{r vb-samples}
+#| content: valuebox
+#| title: "Samples checked"
+list(icon = "collection", color = "primary", value = n_samples)
+```
+
+```{r vb-flagged}
+#| content: valuebox
+#| title: "Flagged samples"
+list(
+  icon = if (n_flagged > 0) "flag" else "check-circle",
+  color = if (n_flagged > 0) "warning" else "success",
+  value = n_flagged
+)
+```
+
+```{r vb-genes}
+#| content: valuebox
+#| title: "Genes with reads"
+list(icon = "list-ul", color = "info", value = comma(qc$genes[["with_reads"]]))
+```
+
+```{r vb-expressed}
+#| content: valuebox
+#| title: "Expressed genes"
+list(
+  icon = "bar-chart",
+  color = "info",
+  value = comma(qc$genes[["expressed"]])
+)
+```
+
+## Row
+
+```{r tbl-summary}
+#| title: "Per-sample metrics"
+knitr::kable(
+  qc$summary,
+  col.names = c("Metric", "Min", "Median", "Max", "Flagged"),
+  align = "lrrrr",
+  row.names = FALSE
+)
+```
+
+```{r flagged-samples}
+#| title: "Flagged samples"
+#| output: asis
+if (n_flagged == 0) {
+  cat("All samples are within the limits on every metric.\n\n")
+} else {
+  flagged <- samples[samples$flagged, c("sample", ".group", "flags")]
+  if (!has_groups) flagged$.group <- NULL
+  cat_table(
+    flagged,
+    col.names = c("Sample", if (has_groups) group_col, "Flagged for")
+  )
+}
+
+cat(
+  "A flag means a sample differs from the others, not why. See the",
+  "Method on the About page for the rule.\n\n"
+)
+
+if (length(qc$checks$meta_only) > 0) {
+  cat(
+    "**In the metadata, without a quantification:**",
+    toString(qc$checks$meta_only), "\n\n"
+  )
+}
+if (length(qc$checks$quant_only) > 0) {
+  cat(
+    "**Quantified, but not in the metadata:**",
+    toString(qc$checks$quant_only), "\n\n"
+  )
+}
+```
+
+## Row
+
+```{r overview-pca}
+#| title: "PCA (PC1 vs PC2)"
+#| fig-width: 7
+#| fig-height: 5.5
+pca_plot(group_col, 1, 2) + theme(legend.position = "right")
+```
+
+::: {.card title="What the components reflect"}
+
+PC1 explains `r sprintf("%.1f", var_pct[1])` % and PC2 `r sprintf("%.1f", var_pct[2])` % of the variance of the `r comma(cfg$ntop)` most variable genes.
+
+- PC1 is most strongly associated with `r best_assoc("PC1")`.
+- PC2 is most strongly associated with `r best_assoc("PC2")`.
+
+```{r technical-warning}
+#| output: asis
+if (nrow(technical_pcs) > 0) {
+  cat(
+    "**A main component follows a technical metric:**",
+    "group differences and library quality may be hard to tell apart.\n\n"
+  )
+  cat(sprintf(
+    "- %s: %s (R^2^ = %.2f)\n",
+    technical_pcs$pc,
+    technical_pcs$variable,
+    technical_pcs$r2
+  ), sep = "")
+} else {
+  cat("No technical metric explains much (R^2^ ≥ 0.5) of PC1 or PC2.\n")
+}
+```
+
+:::
+
+
+# Metrics
+
+## Row
+
+```{r fig-metrics}
+#| title: "Per-sample metrics"
+#| fig-width: 10
+#| fig-height: !expr metric_fig_h
+ggplot(metric_long, aes(x, value)) +
+  stat_summary(
+    aes(x = as.numeric(group), group = group),
+    fun = median,
+    fun.min = median,
+    fun.max = median,
+    geom = "crossbar",
+    width = 0.55,
+    linewidth = 0.3,
+    colour = "grey30"
+  ) +
+  geom_point(
+    aes(fill = group),
+    shape = 21,
+    size = 2.8,
+    stroke = 1,
+    colour = "grey20",
+    alpha = 0.85
+  ) +
+  geom_text_repel(
+    data = metric_long[metric_long$flagged, ],
+    aes(label = sample),
+    size = 2.8,
+    colour = "grey30",
+    max.overlaps = Inf,
+    seed = 1337
+  ) +
+  facet_wrap(~ metric, scales = "free_y", ncol = 2) +
+  scale_x_continuous(
+    breaks = seq_along(levels(m$.group)),
+    labels = levels(m$.group)
+  ) +
+  scale_y_continuous(labels = comma) +
+  scale_fill_manual(values = group_colours, guide = "none") +
+  labs(x = NULL, y = NULL) +
+  theme_qc +
+  theme(
+    strip.text = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 30, hjust = 1)
+  )
+```
+
+## Row
+
+```{r fig-depth}
+#| title: "Detected genes against library size"
+#| fig-width: 7
+#| fig-height: 5
+ggplot(samples, aes(library_size / 1e6, detected_genes)) +
+  geom_point(
+    aes(fill = .group),
+    shape = 21,
+    size = 3.5,
+    stroke = 0.4,
+    colour = "grey20",
+    alpha = 0.85
+  ) +
+  geom_text_repel(
+    aes(label = label),
+    size = 3,
+    colour = "grey30",
+    max.overlaps = Inf,
+    seed = 1337
+  ) +
+  scale_x_log10(labels = comma) +
+  scale_y_continuous(labels = comma) +
+  scale_fill_manual(
+    values = group_colours,
+    name = NULL,
+    guide = if (has_groups) "legend" else "none"
+  ) +
+  labs(x = "Library size (million reads, log scale)", y = "Detected genes") +
+  theme_qc +
+  theme(legend.position = "bottom")
+```
+
+```{r fig-density}
+#| title: "Count distribution, log2(CPM + 1)"
+#| fig-width: 7
+#| fig-height: 5
+dens <- qc$density
+i <- match(dens$sample, samples$sample)
+dens$group <- samples$.group[i]
+dens$flagged <- samples$flagged[i]
+
+ggplot(dens, aes(x, y, group = sample, colour = group)) +
+  geom_line(linewidth = 0.4, alpha = 0.6) +
+  geom_line(data = dens[dens$flagged, ], linewidth = 1) +
+  scale_colour_manual(
+    values = group_colours,
+    name = NULL,
+    guide = if (has_groups) "legend" else "none"
+  ) +
+  labs(x = expression(log[2] ~ (CPM + 1)), y = "Density") +
+  theme_qc +
+  theme(legend.position = "bottom")
+```
+
+## Row
+
+```{r tbl-top-genes}
+#| title: "Genes with the largest share of the reads"
+top <- qc$top_genes
+top$gene_name <- ncbi_link(top$gene_id, top$gene_name)
+
+knitr::kable(
+  top[, c("gene_name", "gene_id", "mean_pct", "max_pct")],
+  col.names = c("Gene", "Gene ID", "Mean share (%)", "Max. share (%)"),
+  align = "llrr",
+  row.names = FALSE
+)
+```
+
+
+# PCA
+
+## Row
+
+```{r fig-scree}
+#| title: "Variance explained"
+#| fig-width: 6
+#| fig-height: 4
+ggplot(scree, aes(pc, var_pct)) +
+  geom_col(fill = series_colours[1], width = 0.7) +
+  geom_text(
+    aes(label = sprintf("%.1f", var_pct)),
+    vjust = -0.4,
+    size = 3.2,
+    colour = "grey20"
+  ) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.12))) +
+  labs(x = "Principal component", y = "Variance explained (%)") +
+  theme_qc +
+  theme(panel.grid.major.x = element_blank())
+```
+
+```{r fig-assoc}
+#| title: "R² of each PC on the metadata and technical metrics (* padj < 0.05)"
+#| fig-width: 8
+#| fig-height: !expr assoc_fig_h
+if (nrow(assoc) == 0) {
+  cat("No variable could be tested.\n")
+} else {
+  ggplot(assoc, aes(pc_lab, variable, fill = r2)) +
+    geom_tile(colour = "white", linewidth = 1) +
+    geom_text(aes(label = label, colour = r2 > 0.55), size = 3.4) +
+    facet_grid(type ~ ., scales = "free_y", space = "free_y") +
+    scale_fill_gradient(
+      low = seq_low,
+      high = seq_high,
+      limits = c(0, 1),
+      name = expression(R^2)
+    ) +
+    scale_colour_manual(
+      values = c(`TRUE` = "white", `FALSE` = "grey15"),
+      guide = "none"
+    ) +
+    scale_x_discrete(expand = c(0, 0)) +
+    scale_y_discrete(expand = c(0, 0)) +
+    labs(x = NULL, y = NULL) +
+    theme_qc +
+    theme(
+      panel.grid = element_blank(),
+      strip.text = element_text(face = "bold")
+    )
+}
+```
+
+## Row {.tabset}
+
+```{r fig-pca-12}
+#| title: "PC1 vs PC2, by metadata"
+#| fig-width: 12
+#| fig-height: !expr pca_fig_h
+pca_grid(pca_cols, pca_names, 1, 2)
+```
+
+```{r fig-pca-34}
+#| title: "PC3 vs PC4, by metadata"
+#| fig-width: 12
+#| fig-height: !expr pca_fig_h
+if (has_pc34) {
+  pca_grid(pca_cols, pca_names, 3, 4)
+} else {
+  cat("Fewer than four principal components.\n")
+}
+```
+
+```{r fig-pca-tech}
+#| title: "PC1 vs PC2, by technical metric"
+#| fig-width: 12
+#| fig-height: !expr tech_fig_h
+pca_grid(tech_cols, unname(tech_lab[tech_cols]), 1, 2)
+```
+
+## Row
+
+```{r tbl-loadings}
+#| title: "Genes with the largest loadings on PC1 and PC2"
+loadings <- qc$pca$loadings
+loadings$gene_name <- ncbi_link(loadings$gene_id, loadings$gene_name)
+
+knitr::kable(
+  loadings[, c("pc", "gene_name", "gene_id", "loading")],
+  col.names = c("Component", "Gene", "Gene ID", "Loading"),
+  align = "lllr",
+  row.names = FALSE
+)
+```
+
+
+# Clustering
+
+## Row
+
+```{r fig-heatmap}
+#| title: "Spearman correlation, ordered by hierarchical clustering"
+#| fig-width: 9
+#| fig-height: 8.5
+heat <- ggplot(cor_long, aes(s1, s2, fill = r)) +
+  geom_raster() +
+  scale_fill_gradient(
+    low = seq_low,
+    high = seq_high,
+    name = "Spearman\ncorrelation"
+  ) +
+  scale_x_discrete(expand = c(0, 0)) +
+  scale_y_discrete(expand = c(0, 0)) +
+  labs(x = NULL, y = NULL) +
+  theme_minimal(base_size = 10) +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+    panel.grid = element_blank()
+  )
+
+if (!show_names) heat <- heat + theme(axis.text = element_blank())
+
+wrap_plots(
+  c(lapply(strip_cols, strip_plot), list(heat)),
+  ncol = 1,
+  heights = c(rep(0.035, length(strip_cols)), 1)
+) +
+  plot_layout(guides = "collect")
+```
+
+## Row
+
+```{r fig-dendrogram}
+#| title: "Clustering of the samples (average linkage on 1 − correlation)"
+#| fig-width: 10
+#| fig-height: 5.5
+leaf_colour <- setNames(
+  unname(group_colours[as.character(samples$.group)]),
+  samples$sample
+)
+
+dend <- dendrapply(as.dendrogram(qc$clustering), function(node) {
+  if (is.leaf(node)) {
+    attr(node, "nodePar") <- list(
+      pch = 19,
+      cex = 0.9,
+      col = leaf_colour[[attr(node, "label")]],
+      lab.cex = 0.7
+    )
+  }
+  node
+})
+
+par(mar = c(if (n_samples <= 60) 8 else 2, 4, 1, 1))
+plot(
+  dend,
+  ylab = "1 − Spearman correlation",
+  leaflab = if (n_samples <= 60) "perpendicular" else "none"
+)
+if (has_groups) {
+  legend(
+    "topright",
+    legend = names(group_colours),
+    col = group_colours,
+    pch = 19,
+    bty = "n",
+    cex = 0.8
+  )
+}
+```
+
+
+# Metadata
+
+## Row
+
+```{r tbl-groups}
+#| title: "Samples per level of each metadata column"
+group_rows <- lapply(cfg$columns, function(col) {
+  x <- samples[[col]]
+
+  if (is.numeric(x)) {
+    return(data.frame(
+      Column = col,
+      Level = sprintf(
+        "%s – %s",
+        format(min(x, na.rm = TRUE)),
+        format(max(x, na.rm = TRUE))
+      ),
+      Samples = sum(!is.na(x))
+    ))
+  }
+
+  n <- table(x, useNA = "ifany")
+  lvl <- names(n)
+  lvl[is.na(lvl)] <- "(missing)"
+  data.frame(Column = col, Level = lvl, Samples = as.integer(n))
+})
+
+do.call(rbind, group_rows) |>
+  knitr::kable(align = "llr", row.names = FALSE)
+```
+
+::: {.card title="Related metadata columns (Cramér's V)"}
+
+When two columns split the samples in the same way, their effects cannot be told apart. Of the `r nrow(conf)` pairs of categorical columns, `r sum(is_confounded)` `r if (sum(is_confounded) == 1) "is" else "are"` nested or strongly related (V ≥ 0.8). Columns derived from each other, such as a group and its season, are expected here.
+
+```{r tbl-confounding}
+#| output: asis
+if (nrow(conf) == 0) {
+  cat("Fewer than two categorical columns.\n")
+} else {
+  cat_table(
+    conf,
+    col.names = c("Column 1", "Column 2", "Samples", "Cramér's V", "Nested"),
+    align = "llrrl"
+  )
+}
+```
+
+:::
+
+## Row
+
+```{r confounding-crosstabs}
+#| title: "Cross-tables of the related columns"
+#| output: asis
+if (length(conf_pairs) == 0) {
+  cat("No pair of columns is nested or strongly related.\n")
+} else {
+  for (pair in conf_pairs) {
+    tab <- qc$crosstabs[[pair]]
+    d <- as.data.frame.matrix(tab)
+    d <- cbind(setNames(data.frame(rownames(d)), pair), d)
+    cat_table(d)
+  }
+}
+```
+
+
+# Samples
+
+## Row
+
+```{r tbl-samples}
+#| title: "All samples (flagged samples highlighted; click a column to sort)"
+metric_cols <- c(
+  "library_size", "pct_mapped", "detected_genes", "top10_pct",
+  "size_factor", "median_cor"
+)
+tbl <- samples[, c("sample", cfg$columns, metric_cols, "flags")]
+
+reactable(
+  tbl,
+  columns = list(
+    sample = colDef(name = "Sample", minWidth = 120),
+    library_size = colDef(
+      name = "Library size",
+      format = colFormat(separators = TRUE)
+    ),
+    pct_mapped = colDef(name = "Mapped (%)"),
+    detected_genes = colDef(
+      name = "Detected genes",
+      format = colFormat(separators = TRUE)
+    ),
+    top10_pct = colDef(name = "Top-10 share (%)"),
+    size_factor = colDef(name = "Size factor"),
+    median_cor = colDef(name = "Median cor."),
+    flags = colDef(name = "Flagged for", minWidth = 160)
+  ),
+  rowStyle = function(index) {
+    if (tbl$flags[index] != "") list(background = flag_colour)
+  },
+  filterable = TRUE,
+  defaultPageSize = 25,
+  striped = FALSE,
+  highlight = TRUE,
+  compact = TRUE,
+  theme = reactableTheme(cellPadding = "4px 6px")
+)
+```
+
+
+# About
+
+## Row
+
+::: {.card title="Method"}
+
+Gene-level counts were imported from the salmon quantifications with tximport (v`r cfg$versions[["tximport"]]`) and checked without the experimental design (DESeq2 v`r cfg$versions[["DESeq2"]]`, design `~ 1`).
+
+- **Library size** is the number of reads assigned to genes, and **mapping rate** the share of the processed reads that salmon mapped.
+- **Detected genes** have at least one read. The **top-10 share** is the share of a sample's reads in its 10 most abundant genes; a high share means a few genes dominate the library.
+- **PCA** used the variance-stabilised counts (vst, blind to the design) of the `r comma(cfg$ntop)` most variable genes, as in `DESeq2::plotPCA()`. Each principal component was regressed on every metadata column and technical metric; R^2^ is the share of the component's variance that the variable explains.
+- **Correlations** are Spearman correlations of the variance-stabilised counts of the `r comma(qc$genes[["expressed"]])` genes with at least `r cfg$min_count` reads in half of the samples. Samples were clustered on 1 − correlation with average linkage. A sample's **median correlation** is the median over all other samples.
+- **Metadata columns** were compared in pairs with Cramér's V, which is 0 when two columns are unrelated and 1 when one determines the other.
+- **Flags.** A sample is flagged when a metric is more than `r cfg$mad` median absolute deviations, and at least a minimum difference, from the median on the bad side: a low library size (log~10~), mapping rate, number of detected genes or median correlation, or a high top-10 share.
+
+:::
+
+```{r sessioninfo}
+#| title: "Session info"
+sessionInfo()
+```

@@ -1,0 +1,27 @@
+author: "Andrey H."
+date:   today
+
+format:
+  dashboard:
+    css:   ../styles.css
+    theme: pulse
+
+    orientation: rows
+    scrolling:   true
+
+    nav-buttons:
+      - icon: house-door-fill
+        href: https://karlssonlab.se/
+        aria-label: karlssonlab.se
+      - icon: github
+        href: https://github.com/andreyhgl/transcriptome-analysis
+        aria-label: Source on GitHub
+
+output-file: sample_qc-deck
+output-ext:  html
+
+embed-resources:    true
+warning:            false
+echo:               false
+callout-appearance: default
+callout-icon:       true
