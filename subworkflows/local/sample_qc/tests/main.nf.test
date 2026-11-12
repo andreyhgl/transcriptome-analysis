@@ -1,0 +1,61 @@
+nextflow_workflow {
+
+ name "Test SAMPLE_QC"
+    script "../main.nf"
+    workflow "SAMPLE_QC"
+    tag "sample_qc"     // "testnames" or tags
+    tag "subworkflows"  // nf-test test --tag sample_qc
+
+    options "-stub"     // nextflow run --stub
+
+    test("four dummy samples - stub") {
+
+        when {
+            workflow {
+                """
+                def data   = "${projectDir}/tests/data/sample_qc"
+                def assets = "${projectDir}/assets"
+
+                input[0] = channel.of('S1', 'S2', 'S3', 'S4')
+                    .map { s -> file("\${data}/quant/\${s}", checkIfExists: true) }
+                input[1] = channel.of(file("\${data}/metadata.csv", checkIfExists: true))
+                input[2] = channel.of(file("\${data}/tx2gene.tsv", checkIfExists: true))
+                input[3] = file("\${assets}/quarto_report/sample_qc.qmd", checkIfExists: true)
+                input[4] = file("\${assets}/quarto_report/_quarto.yml", checkIfExists: true)
+                input[5] = file("\${assets}/quarto_dashboard/sample_qc_dashboard.qmd", checkIfExists: true)
+                input[6] = file("\${assets}/quarto_dashboard/_quarto.yml", checkIfExists: true)
+                input[7] = file("\${assets}/styles.css", checkIfExists: true)
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+
+                // SAMPLE_QC_METRICS, SAMPLE_QC_DASHBOARD, SAMPLE_QC_REPORT
+                { assert workflow.trace.succeeded().size() == 3 },
+
+                // SAMPLE_QC_METRICS.out.rds
+                { assert workflow.out.rds.size() == 1 },
+
+                // SAMPLE_QC_METRICS.out.samples
+                { assert workflow.out.samples.size() == 1 },
+
+                // SAMPLE_QC_METRICS.out.log
+                { assert workflow.out.qc_log.size() == 1 },
+
+                // SAMPLE_QC_REPORT.out.html
+                { assert workflow.out.report.size() == 1 },
+
+                // SAMPLE_QC_DASHBOARD.out.html
+                { assert workflow.out.dashboard.size() == 1 },
+                { assert workflow.out.versions.size() == 3 },
+
+                // nf-test test ... --update-snapshot
+                { assert snapshot(workflow.out).match() }
+            )
+        }
+    }
+
+}

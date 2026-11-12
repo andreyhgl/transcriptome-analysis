@@ -12,3 +12,6 @@ refs/
 manuscript/
 /work/
 /tmp/
+
+.nf-test/
+.nf-test.log
