@@ -58,7 +58,9 @@ def paramsSections(p) {
             title : 'Sample QC',
             colour: 'yellow',
             rows  : [
-                'Skip': params.skip_sample_qc
+                'Skip'         : params.skip_sample_qc,
+                'PCA n_top'    : params.sample_qc_ntop,
+                'MAD threshold': params.sample_qc_mad
             ]
         ],
         [
