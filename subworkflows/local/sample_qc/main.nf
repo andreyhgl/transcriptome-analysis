@@ -43,7 +43,6 @@ workflow SAMPLE_QC {
     )
     ch_versions = ch_versions.mix ( SAMPLE_QC_DASHBOARD.out.versions.first() )
 
-
     SAMPLE_QC_REPORT (
         SAMPLE_QC_METRICS.out.rds,
         quarto_report_file,
