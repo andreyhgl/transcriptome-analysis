@@ -1,7 +1,9 @@
 # Analysis pipeline
 
+## Processes
+
 + Produce quant files
-+ Check sample quality
++ [Check sample quality (`SAMPLE_QC`)](#Sample-quality-control)
 + Calculate differential gene expression
 + Add annotation to genes
 + Pathway enrichment:
@@ -82,17 +84,17 @@ nextflow run andreyhgl/transcriptome-analysis \
 
 ## Sample quality control
 
-Quality checks samples prior to differential expression analysis. The check is blind to experimental design (DESeq2 design: `~1`). The check runs in parallel to the main analysis and can be turned off with `--skip_sample_qc`. Every sample with both metadata and a quantification is checked.
+Sample quality control checks samples prior to the differential expression analysis. The check is blind to experimental design (DESeq2 design: `~1`). The check runs in parallel to the main analysis and can be turned off with `--skip_sample_qc`. Every sample with both metadata and a quant-file is checked.
 
-+ **Per-sample metrics:** library size, mapping rate (from salmon's `aux_info/meta_info.json`), detected genes, share of reads in the 10 most abundant genes, size factor, and median correlation with the other samples
-+ **PCA** on the vst counts of the most variable genes. Each principal component is regressed on every metadata column and technical metric, to show what drives it
-+ **Clustering** on Spearman correlations of the expressed genes
-+ **Confounded metadata:** pairs of categorical columns compared with Cramér's V, and nested columns
-+ **Flags:** a sample is flagged when a metric is more than `--sample_qc_mad` median absolute deviations, and at least a minimum difference, from the median, on the bad side (low library size, mapping rate, detected genes or correlation; high top-10 share). The minimum differences are set in `bin/sample_qc.R` and stop very tight metrics from giving trivial flags, such as a mapping rate of 99.1 % against 99.5 %
++ **Per-sample metrics:** library size, mapping rate (from salmon's `aux_info/meta_info.json`), detected genes, share of reads in the 10 most abundant genes, size factor, and median correlation with the other samples.
++ **PCA** on the vst counts of the most variable genes. Each principal component is regressed on every metadata column and technical metric, to show what drives it.
++ **Clustering** on Spearman correlations of the expressed genes.
++ **Confounded metadata:** pairs of categorical columns compared with [Cramér's V](https://en.wikipedia.org/wiki/Cram%C3%A9r%27s_V), and nested columns.
++ **Flags:** a sample is flagged when a metric is more than `--sample_qc_mad` (default: 3) median absolute deviations, and at least a minimum difference, from the median, on the bad side (low library size, mapping rate, detected genes or correlation; high top-10 share). The minimum differences are set in `bin/sample_qc.R` and stop very tight metrics from giving trivial flags, such as a mapping rate of 99.1 % against 99.5 %
 
 A flag says that a sample differs from the others, not why, and no sample is removed automatically. To leave a sample out, remove it from the metadata and rerun with `-resume`.
 
-The results are written to `analysis/sample_qc/`:
+The results are written to `<outdir>/sample_qc/`:
 
 | File | Content |
 |---|---|
@@ -111,7 +113,7 @@ The results are written to `analysis/sample_qc/`:
 | `--sample_qc_min_count` | `10` | Reads a gene needs in half of the samples to be used for the correlations |
 | `--sample_qc_mad` | `3` | Median absolute deviations from the median before a sample is flagged |
 
-To preview the report or the dashboard locally against published results:
+To preview the report or the dashboard locally:
 
 ```sh
 quarto preview assets/quarto_dashboard/sample_qc_dashboard.qmd \
