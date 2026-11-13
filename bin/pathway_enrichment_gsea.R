@@ -284,6 +284,7 @@ run_go <- function(genes, orgdb) {
       OrgDb = orgdb,
       keyType = "ENSEMBL",
       ont = ont,
+      exponent = 1, eps = 0,
       minGSSize = opt$min_size,
       maxGSSize = opt$max_size,
       pvalueCutoff = 1,

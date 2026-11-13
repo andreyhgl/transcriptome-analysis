@@ -30,7 +30,7 @@
 # > Rscript pathway_enrichment_ora.R --results x.tsv --databases GO,Reactome
 #
 # Container:
-# > docker://ghcr.io/andreyhgl/enrichment-env:main
+# > docker://ghcr.io/andreyhgl/enrichment-env:c237546
 #==============================================================================
 
 
@@ -59,10 +59,10 @@ parse_args <- function(defaults, args = commandArgs(trailingOnly = TRUE)) {
 # Default
 defaults <- list(
   prefix = "ORA",
-  results = "results.tsv",
-  contrast = "",
+  results = "deseq2/results/dds_fall_2022_vs_control.tsv",
+  contrast = "fall_2022_vs_control",
   species = "human",
-  annotation = "",
+  annotation = "annotation/ensembl_human_v115.tsv",
   databases = "GO,KEGG,Reactome",
   gene_alpha = 0.05,
   alpha = 0.05,
