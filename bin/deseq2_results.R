@@ -23,7 +23,7 @@
 # > Rscript deseq2_results.R --dds dds.Rds --alpha 0.1 --lfc_threshold 1
 #
 # Container:
-# > docker://ghcr.io/andreyhgl/deseq2-env:main
+# > docker://ghcr.io/andreyhgl/deseq2-env:f070b01
 #==============================================================================
 
 
@@ -168,7 +168,7 @@ for (i in seq_along(coefs)) {
 
 summary_tbl <- do.call(rbind, summary_list)
 
-print_section(sprintf("Significant genes (padj < %s)", opt$alpha))
+print_section(sprintf("Significant genes (padj < %s | abs(lfc) > %s)", opt$alpha, opt$lfc_threshold))
 print(summary_tbl[, c("contrast", "up", "down", "tested")], row.names = FALSE)
 
 write.table(

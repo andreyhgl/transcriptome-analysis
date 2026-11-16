@@ -4,8 +4,8 @@ process DESEQ2_RESULTS {
 
     conda "${moduleDir}/../environment.yml"
     container "${workflow.containerEngine == 'singularity' ?
-        'docker://ghcr.io/andreyhgl/deseq2-env:main' :
-        'ghcr.io/andreyhgl/deseq2-env:main'}"
+        'docker://ghcr.io/andreyhgl/deseq2-env:f070b01' :
+        'ghcr.io/andreyhgl/deseq2-env:f070b01'}"
 
     input:
     tuple val(meta), path(rds)
