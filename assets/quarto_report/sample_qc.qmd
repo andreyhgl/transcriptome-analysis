@@ -1,6 +1,6 @@
 ---
 title: "Sample quality control"
-subtitle: "RNA-seq, before differential expression"
+subtitle: "RNA-seq"
 
 params:
   qc: "sample_qc.Rds"     # output of sample_qc.R
@@ -341,29 +341,18 @@ metric_fig_h <- 1 + 2.8 * ceiling(length(metrics) / 2)
 p <- ggplot(metric_long, aes(x, value)) +
   stat_summary(
     aes(x = as.numeric(group), group = group),
-    fun = median,
-    fun.min = median,
-    fun.max = median,
+    fun = median, fun.min = median, fun.max = median,
     geom = "crossbar",
-    width = 0.55,
-    linewidth = 0.3,
-    colour = "grey30"
+    width = 0.55, linewidth = 0.3, colour = "grey70"
+  ) +
+  geom_text_repel(
+    #data = metric_long[metric_long$flagged, ],
+    aes(label = sample),
+    size = 3, colour = "black", max.overlaps = Inf, seed = 1337
   ) +
   geom_point(
     aes(fill = group),
-    shape = 21,
-    size = 2.8,
-    stroke = 1,
-    colour = "grey20",
-    alpha = 0.85
-  ) +
-  geom_text_repel(
-    data = metric_long[metric_long$flagged, ],
-    aes(label = sample),
-    size = 2.8,
-    colour = "grey30",
-    max.overlaps = Inf,
-    seed = 1337
+    shape = 21, size = 2.8, stroke = 1, colour = "grey20", alpha = 0.85
   ) +
   facet_wrap(~ metric, scales = "free_y", ncol = 2) +
   scale_x_continuous(
@@ -375,8 +364,8 @@ p <- ggplot(metric_long, aes(x, value)) +
   labs(x = NULL, y = NULL) +
   theme_qc +
   theme(
-    strip.text = element_text(face = "bold"),
-    axis.text.x = element_text(angle = 30, hjust = 1)
+    strip.text = element_text(face = "bold")#,
+    #axis.text.x = element_text(angle = 30, hjust = 1)
   )
 
 print(p)
@@ -492,7 +481,7 @@ pca_plot <- function(col, i, j) {
       samples,
       aes(.data[[x]], .data[[y]], fill = .data[[col]], shape = .data[[col]])
     ) +
-      geom_point(size = 4, stroke = 0.4, colour = "grey20", alpha = 0.85) +
+      geom_point(size = 4, stroke = 0.8, colour = "black", alpha = 0.85) +
       scale_fill_manual(
         values = level_colours(samples[[col]]),
         na.value = na_colour,
@@ -509,8 +498,8 @@ pca_plot <- function(col, i, j) {
     geom_text_repel(
       aes(.data[[x]], .data[[y]], label = label),
       inherit.aes = FALSE,
-      size = 3,
-      colour = "grey30",
+      size = 3.5,
+      colour = "black",
       max.overlaps = Inf,
       seed = 1337
     ) +

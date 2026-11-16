@@ -1,5 +1,5 @@
 ---
-title: "Sample quality control"
+title: "Sample quality control | RNA-seq"
 format:
   dashboard:
     orientation: rows
@@ -376,7 +376,6 @@ strip_plot <- function(col) {
     )
 }
 ```
-
 
 # Overview
 
