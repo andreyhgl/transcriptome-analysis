@@ -87,33 +87,24 @@ if (params$annotation != "") {
   anno <- anno[!duplicated(anno$gene_id), ]
 }
 
-# Rds files in enrichment_dir, told apart by their suffix:
-# - *_ora.Rds and *_gsea.Rds (pathway_enrichment_ora.R and
-#   pathway_enrichment_gsea.R): one per contrast and method,
-#   list(terms, stats, universe, settings)
-# - *_go_themes.Rds (go_themes.R): optional, at most one,
-#   list(themes, settings)
+# pathway_enrichment_ora.R and pathway_enrichment_gsea.R: one Rds per
+# contrast and method, list(terms, stats, universe, settings)
 enr_dir <- resolve(params$enrichment_dir)
 enr_files <- list.files(enr_dir, pattern = "\\.Rds$", full.names = TRUE)
 
 ora_files <- grep("_ora\\.Rds$", enr_files, value = TRUE)
 gsea_files <- grep("_gsea\\.Rds$", enr_files, value = TRUE)
-themes_files <- grep("_go_themes\\.Rds$", enr_files, value = TRUE)
 
 if (length(ora_files) == 0) {
   stop("No ORA Rds files (*_ora.Rds) in: ", enr_dir)
 }
 
-other <- setdiff(enr_files, c(ora_files, gsea_files, themes_files))
+other <- setdiff(enr_files, c(ora_files, gsea_files))
 if (length(other) > 0) {
   warning(
-    "Ignored Rds files that are not *_ora.Rds, *_gsea.Rds or ",
-    "*_go_themes.Rds: ",
+    "Ignored Rds files that are neither *_ora.Rds nor *_gsea.Rds: ",
     toString(basename(other))
   )
-}
-if (length(themes_files) > 1) {
-  stop("More than one GO themes Rds: ", toString(basename(themes_files)))
 }
 
 # Read one method's Rds files and check their layout
@@ -135,13 +126,6 @@ read_enrichment <- function(files) {
 enr <- read_enrichment(ora_files)
 gsea <- read_enrichment(gsea_files)
 has_gsea <- length(gsea) > 0
-
-go_themes <- if (length(themes_files) == 1) readRDS(themes_files) else NULL
-is_themes <- is.list(go_themes) &&
-  all(c("themes", "settings") %in% names(go_themes))
-if (!is.null(go_themes) && !is_themes) {
-  stop("Not a GO themes Rds with themes and settings: ", themes_files)
-}
 
 # Enrichment contrast -> DESeq2 level: "DDS_summer_2022_vs_control" and
 # "summer_2022_vs_control" both give "summer_2022"; the longest level wins
@@ -651,24 +635,6 @@ terms <- bind_part("terms") |>
     fold = ratio_num(GeneRatio) / ratio_num(BgRatio)
   )
 
-# GO themes from go_themes.R: one theme per term, the same in every group;
-# NA for KEGG and Reactome, and for every term without a themes Rds
-use_themes <- !is.null(go_themes) && nrow(go_themes$themes) > 0
-theme_cols <- c("ONTOLOGY", "ID", "theme_id", "theme", "theme_size")
-terms <- if (use_themes) {
-  left_join(terms, go_themes$themes[, theme_cols], by = c("ONTOLOGY", "ID"))
-} else {
-  mutate(
-    terms,
-    theme_id = NA_character_,
-    theme = NA_character_,
-    theme_size = NA_integer_
-  )
-}
-
-# Theme plots replace term plots for GO when themes are available
-is_theme_db <- function(db) use_themes && startsWith(db, "GO_")
-
 # Number of groups each term is enriched in, per database and direction
 any_season <- count(terms, database, direction, ID, name = "n_seasons")
 all_seasons <- any_season[any_season$n_seasons == length(contrasts), ]
@@ -696,43 +662,6 @@ enr_text <- enum(sprintf(
   comma(n_terms_season),
   group_lab[contrasts]
 ))
-
-# "412 GO:BP terms in 57 themes, ..." over all groups and directions
-theme_text <- if (use_themes) {
-  th <- go_themes$themes
-  enum(vapply(c("BP", "MF", "CC"), function(ont) {
-    t_ont <- th[th$ONTOLOGY == ont, ]
-    sprintf(
-      "%s GO:%s terms in %s themes",
-      comma(nrow(t_ont)),
-      ont,
-      comma(length(unique(t_ont$theme_id)))
-    )
-  }, character(1)))
-} else {
-  ""
-}
-
-theme_method <- if (use_themes) {
-  cfg <- go_themes$settings
-  paste0(
-    "GO terms describing the same biology were grouped into themes by ",
-    "semantic similarity, with the R-package GOSemSim (v",
-    cfg$versions[["GOSemSim"]], "; Yu et al., 2010) and the \"",
-    cfg$measure, "\" measure. The enriched GO terms of all groups and ",
-    "directions were pooled before grouping, so that a theme contains the ",
-    "same terms in every group and the groups can be compared by theme. ",
-    "Per ontology, the terms were clustered by complete linkage of ",
-    "1 − similarity and the tree was cut at ", cfg$threshold,
-    ", as in the R-package rrvgo ([Sayols, 2023]",
-    "(https://doi.org/10.17912/micropub.biology.000811)), so every pair of ",
-    "terms in a theme has a similarity of at least ", 1 - cfg$threshold,
-    ". Each theme is named after its term with the smallest adjusted ",
-    "p-value in any group."
-  )
-} else {
-  ""
-}
 ```
 
 ::: {.callout-note title="Method" collapse=true}
@@ -742,8 +671,6 @@ To investigate whether biological functions, processes or pathways were over-rep
 Each group was tested three times: with its up-regulated DEGs, its down-regulated DEGs and both directions together (padj < `r enr_cfg$gene_alpha`). Testing the directions separately is more sensitive, since a pathway whose genes change in both directions is diluted when they are tested together ([Hong et al., 2014](https://doi.org/10.1098/rsif.2013.0950)). The background (universe) was all genes in that group's DESeq2 results table, i.e. the genes that passed the gene filter, rather than the whole genome, which would favour terms whose genes are simply expressed in the tissue ([Timmons et al., 2015](https://doi.org/10.1186/s13059-015-0761-7)).
 
 GO was tested with the Ensembl gene IDs; for KEGG and Reactome, the IDs were mapped to Entrez IDs with `r enr_cfg$orgdb` (v`r enr_cfg$versions[["orgdb"]]`), which `r sprintf("%.0f–%.0f", entrez_pct[1], entrez_pct[2])` % of the background had (@tbl-enrichment-sets). Gene sets of 10–500 genes were tested, clusterProfiler's default. P-values were adjusted for multiple testing using the Benjamini–Hochberg method, for GO over the three ontologies together, and terms with an adjusted p-value < `r enr_cfg$alpha` were considered significant. Terms supported by fewer than `r enr_cfg$min_count` genes from the input list were excluded.
-
-`r theme_method`
 
 ```{r tbl-enrichment-sets}
 #| tbl-cap: !expr paste0("Genes in the enrichment tests per group. The direction columns show the DEGs (padj < ", enr_cfg$gene_alpha, ") that were tested. Background is all genes in the group's results table, and Entrez the number of those with an Entrez ID, which KEGG and Reactome are tested with.")
@@ -804,7 +731,7 @@ rbind(
 
 ### Shared between groups
 
-The figures below compare the enriched terms across the groups, one tab per database. Each row is a term and each column a group, so a term enriched in every group has a point in every column; terms enriched in the most groups are at the top of each panel. The up- and down-regulated DEGs are shown in separate panels. `r if (use_themes) paste0("GO terms are often redundant, with many terms describing the same biology, so the GO tabs show themes of similar terms instead of single terms: across all groups and directions, the enriched terms formed ", theme_text, ". The terms of each theme are listed in the interactive tables below.") else ""`
+The figures below compare the enriched terms across the groups, one tab per database. Each row is a term and each column a group, so a term enriched in every group has a point in every column; terms enriched in the most groups are at the top of each panel. The up- and down-regulated DEGs are shown in separate panels.
 
 ```{r enrichment-dotplot-functions}
 # terms per group and direction in the dot plots
@@ -819,26 +746,11 @@ wrap_text <- function(x, width = 55) {
   )
 }
 
-# One row per theme, group and direction: the best padj and the number of
-# the theme's terms enriched there. The label shows the theme's total size.
-theme_rows <- function(d) {
-  d |>
-    filter(!is.na(theme_id)) |>
-    group_by(contrast, direction, theme_id, theme, theme_size) |>
-    summarise(p.adjust = min(p.adjust), size = n(), .groups = "drop") |>
-    mutate(
-      ID = theme_id,
-      Description = sprintf("%s (%d)", theme, theme_size)
-    )
-}
-
-# Top terms (or GO themes) per group and direction, plus every other group
-# they are enriched in; one row per term and group
+# Top terms per group and direction, plus every other group they are
+# enriched in; one row per term and group
 dot_data <- function(db) {
   d <- terms[terms$database == db & terms$direction != "Both", ]
   if (nrow(d) == 0) return(d)
-
-  d <- if (is_theme_db(db)) theme_rows(d) else mutate(d, size = fold)
 
   top <- d |>
     group_by(contrast, direction) |>
@@ -886,19 +798,9 @@ plot_dots <- function(db) {
   rows <- d[!duplicated(d$row), ]
   y_lab <- setNames(wrap_text(rows$Description), as.character(rows$row))
 
-  size_scale <- if (is_theme_db(db)) {
-    scale_size_continuous(
-      range = c(2, 7),
-      name = "Enriched\nterms",
-      breaks = function(l) unique(pmax(1, round(scales::breaks_pretty(4)(l))))
-    )
-  } else {
-    scale_size_continuous(range = c(2, 7), name = "Fold\nenrichment")
-  }
-
   ggplot(d, aes(contrast, row)) +
     geom_point(
-      aes(size = size, fill = -log10(p.adjust)),
+      aes(size = fold, fill = -log10(p.adjust)),
       shape = 21,
       colour = "grey20",
       stroke = 0.3
@@ -911,7 +813,7 @@ plot_dots <- function(db) {
     ) +
     scale_x_discrete(labels = lab_fun, drop = FALSE) +
     scale_y_discrete(labels = y_lab) +
-    size_scale +
+    scale_size_continuous(range = c(2, 7), name = "Fold\nenrichment") +
     # one-hue sequential ramp: light = least, dark = most significant
     scale_fill_gradient(
       low = "#b7d3f6",
@@ -927,20 +829,6 @@ plot_dots <- function(db) {
 }
 
 dot_cap <- function(db) {
-  if (is_theme_db(db)) {
-    return(paste0(
-      db_lab[[db]], " themes enriched among the up- (top) and ",
-      "down-regulated (bottom) DEGs of each group, compared with ", ref,
-      ". A theme groups semantically similar GO terms and is named after ",
-      "its most significant term, with its number of terms in parentheses. ",
-      "The ", TOP_TERMS, " themes with the smallest adjusted p-value per ",
-      "group and direction are shown, together with every other group the ",
-      "theme is enriched in. Point size shows how many of the theme's terms ",
-      "are enriched in that group, and colour the smallest adjusted p-value ",
-      "among them; no point means none of its terms is enriched in that group."
-    ))
-  }
-
   paste0(
     db_lab[[db]], " terms enriched among the up- (top) and down-regulated ",
     "(bottom) DEGs of each group, compared with ", ref, ". The ", TOP_TERMS,
@@ -1014,7 +902,7 @@ print(p); if (params$export_fig) save_figure(p)
 ### Enriched terms per group
 
 ::: {.callout-tip title="Interactive table"}
-The tables below have a drop-down menu which shows the genes included in the gene set, ranked by their shrunken log~2~ fold change. Click on the arrow ▶ on the left side of each row to reveal the genes. Gene names link to the corresponding [NCBI gene page](https://www.ncbi.nlm.nih.gov/gene/). The tooltip (appears when hovering) shows the log~2~ fold change of the gene in that group; red is up-regulated and blue down-regulated. `r if (use_themes) "The GO theme column shows which theme each GO term belongs to; type a theme ID, e.g. BP-003, in its filter box to list all of its terms." else ""`
+The tables below have a drop-down menu which shows the genes included in the gene set, ranked by their shrunken log~2~ fold change. Click on the arrow ▶ on the left side of each row to reveal the genes. Gene names link to the corresponding [NCBI gene page](https://www.ncbi.nlm.nih.gov/gene/). The tooltip (appears when hovering) shows the log~2~ fold change of the gene in that group; red is up-regulated and blue down-regulated.
 :::
 
 ```{r enrichment-table-functions}
@@ -1077,18 +965,9 @@ enrichment_table <- function(x, dir) {
   d <- d[order(d$database, d$p.adjust), ]
   d$source <- unname(db_short[as.character(d$database)])
 
-  # GO theme as "BP-003: representative term"; empty for KEGG and Reactome
-  d$theme_lab <- ifelse(
-    is.na(d$theme_id),
-    "",
-    paste0(d$theme_id, ": ", d$theme)
-  )
-
   lfc <- lfc_lookup(x)
   tbl_id <- paste("enr", x, dir, sep = "-")
-  cols <- c(
-    "source", "Description", "theme_lab", "ID", "Count", "fold", "p.adjust"
-  )
+  cols <- c("source", "Description", "ID", "Count", "fold", "p.adjust")
 
   reactable(
     as.data.frame(d[, cols]),
@@ -1102,11 +981,6 @@ enrichment_table <- function(x, dir) {
         }
       ),
       Description = colDef(name = "Term", minWidth = 220),
-      theme_lab = colDef(
-        name = "GO theme",
-        minWidth = 180,
-        show = use_themes
-      ),
       ID = colDef(name = "Term ID", maxWidth = 150),
       Count = colDef(maxWidth = 70),
       fold = colDef(
@@ -1166,6 +1040,397 @@ for (x in contrasts) {
   cat("\n#### ", group_lab[[x]], "\n")
   enrichment_tabs(x)
 }
+```
+
+### Genes behind the GO terms
+
+The ORA tables and figures above look at the enriched terms one by one. This section turns the same results around and starts from the genes. Enriched terms often share most of their genes, also across the three ontologies, so several terms can be one signal counted more than once. Genes that are part of many enriched terms are the ones driving the GO results. Only the up- and down-regulated tests are used, so a gene counts once per group.
+
+```{r gene-view-data}
+# Databases in the gene view; add "KEGG" and "Reactome" to include them
+GENE_VIEW_DBS <- c("GO_BP", "GO_MF", "GO_CC")
+
+# genes in the kable, terms listed per gene in the lookup table, and terms
+# and genes per heat map
+GENE_VIEW_TOP <- 15
+GENE_VIEW_MAX_TERMS <- 15
+HEAT_TERMS <- 15
+HEAT_GENES <- 40
+
+# GO themes from go_themes.R when the report has them, NA otherwise; the
+# ORA table `terms` itself is left as it is
+gene_view_src <- if ("theme_id" %in% names(terms)) {
+  terms
+} else {
+  mutate(terms, theme_id = NA_character_)
+}
+gene_view_themes <- any(!is.na(gene_view_src$theme_id))
+
+# One row per gene and enriched term, from the up- and down-regulated tests
+gene_long <- gene_view_src |>
+  filter(
+    as.character(database) %in% GENE_VIEW_DBS,
+    direction %in% c("Up", "Down")
+  ) |>
+  select(
+    contrast, direction, database, ID, Description, p.adjust, theme_id,
+    gene_id, gene_name
+  ) |>
+  unnest(cols = c(gene_id, gene_name)) |>
+  mutate(
+    contrast = as.character(contrast),
+    direction = as.character(direction),
+    term_key = paste(database, ID)
+  )
+
+has_gene_view <- nrow(gene_long) > 0
+
+# Shrunken log2 fold change per gene, one named vector per group
+lfc_all <- lapply(setNames(contrasts, contrasts), lfc_lookup)
+
+# One row per gene: enriched GO terms and themes over all groups
+gene_summary <- gene_long |>
+  group_by(gene_id) |>
+  summarise(
+    gene_name = first(gene_name),
+    n_terms = n_distinct(term_key),
+    n_themes = n_distinct(theme_id[!is.na(theme_id)]),
+    n_groups = n_distinct(contrast),
+    .groups = "drop"
+  ) |>
+  arrange(desc(n_terms), desc(n_groups))
+
+# One row per gene and group: enriched GO terms, direction and log2FC
+gene_group <- gene_long |>
+  group_by(gene_id, contrast) |>
+  summarise(
+    n = n_distinct(term_key),
+    dir = first(direction),
+    .groups = "drop"
+  ) |>
+  mutate(
+    lfc = unname(mapply(
+      function(g, x) unname(lfc_all[[x]][g]),
+      gene_id,
+      contrast
+    ))
+  )
+
+# The terms of each gene as text: terms enriched in the most groups first,
+# at most GENE_VIEW_MAX_TERMS
+gene_terms_text <- gene_long |>
+  group_by(gene_id, term_key, Description, database) |>
+  summarise(
+    n_groups = n_distinct(contrast),
+    best = min(p.adjust),
+    .groups = "drop"
+  ) |>
+  arrange(gene_id, desc(n_groups), best) |>
+  mutate(
+    lab = sprintf(
+      "%s (%s)",
+      Description,
+      db_short[as.character(database)]
+    )
+  ) |>
+  group_by(gene_id) |>
+  summarise(
+    terms = paste0(
+      paste(head(lab, GENE_VIEW_MAX_TERMS), collapse = "; "),
+      if (n() > GENE_VIEW_MAX_TERMS) {
+        sprintf("; +%d more", n() - GENE_VIEW_MAX_TERMS)
+      } else {
+        ""
+      }
+    ),
+    .groups = "drop"
+  )
+
+gene_view_text <- if (has_gene_view) {
+  top <- gene_summary[1, ]
+  paste0(
+    "In total, ", comma(nrow(gene_summary)), " genes were part of at least ",
+    "one enriched GO term in at least one group. ",
+    comma(sum(gene_summary$n_terms >= 10)), " genes were in 10 or more ",
+    "terms, and the gene in the most terms was *", top$gene_name, "*, with ",
+    top$n_terms, " terms in ", top$n_groups, " group",
+    if (top$n_groups > 1) "s" else "", " (@tbl-gene-terms)."
+  )
+} else {
+  "No GO term was enriched among the up- or down-regulated genes."
+}
+```
+
+`r gene_view_text`
+
+```{r tbl-gene-terms}
+#| eval: !expr has_gene_view
+#| tbl-cap: !expr paste0("The ", GENE_VIEW_TOP, " genes in the most enriched GO terms, over all groups. GO terms counts each term once, whichever group it is enriched in", if (gene_view_themes) ", and GO themes the themes those terms belong to" else "", ". The group columns show the number of enriched GO terms the gene is part of in that group, and whether the gene is ↑ up- or ↓ down-regulated there.")
+
+# "12 ↑" per gene and group
+per_group <- gene_group |>
+  mutate(
+    arrow = ifelse(dir == "Up", "↑", "↓"),
+    cell = sprintf("%d %s", n, arrow)
+  ) |>
+  select(gene_id, contrast, cell) |>
+  pivot_wider(names_from = contrast, values_from = cell, values_fill = "")
+
+for (x in setdiff(contrasts, names(per_group))) per_group[[x]] <- ""
+
+tbl <- gene_summary |>
+  head(GENE_VIEW_TOP) |>
+  left_join(per_group, by = "gene_id") |>
+  mutate(Gene = paste0("*", gene_name, "*")) |>
+  select(
+    Gene,
+    `Ensembl ID` = gene_id,
+    `GO terms` = n_terms,
+    `GO themes` = n_themes,
+    all_of(contrasts)
+  )
+
+if (!gene_view_themes) tbl$`GO themes` <- NULL
+names(tbl)[names(tbl) %in% contrasts] <- unname(
+  group_lab[names(tbl)[names(tbl) %in% contrasts]]
+)
+
+knitr::kable(
+  tbl,
+  align = paste0("ll", strrep("r", ncol(tbl) - 2)),
+  row.names = FALSE
+)
+```
+
+#### Gene lookup
+
+::: {.callout-tip title="Interactive table"}
+One row per gene that is part of at least one enriched GO term. Type a gene name in the filter box of the Gene column to see every GO term it contributes to. The group columns show how many enriched GO terms the gene is part of in that group, with an arrow for its direction; the tooltip shows its shrunken log~2~ fold change. The last column lists the gene's terms, those enriched in the most groups first, at most `r GENE_VIEW_MAX_TERMS`.
+:::
+
+```{r gene-lookup-table}
+#| eval: !expr has_gene_view
+#| column: page
+
+lookup <- gene_summary |>
+  left_join(gene_terms_text, by = "gene_id")
+
+for (x in contrasts) {
+  g <- gene_group[gene_group$contrast == x, ]
+  i <- match(lookup$gene_id, g$gene_id)
+  lookup[[paste0("n_", x)]] <- g$n[i]
+  lookup[[paste0("d_", x)]] <- ifelse(g$dir[i] == "Up", "↑", "↓")
+  lookup[[paste0("l_", x)]] <- round(g$lfc[i], 2)
+}
+
+# Gene symbol as a link to its NCBI gene page, built in the browser
+gene_cell <- JS(
+  "function(cellInfo) {
+    return '<a href=\"https://www.ncbi.nlm.nih.gov/gene/?term=' +
+      cellInfo.row['gene_id'] +
+      '\" target=\"_blank\" rel=\"noopener\"><i>' + cellInfo.value +
+      '</i></a>';
+  }"
+)
+
+# "12 ↑" in the colour of the direction, with log2FC as the tooltip
+group_cell <- function(x) {
+  JS(sprintf(
+    "function(cellInfo) {
+      if (cellInfo.value == null) return '';
+      var d = cellInfo.row['d_%1$s'];
+      var col = d === '↑' ? '%2$s' : '%3$s';
+      return '<span style=\"color:' + col + ';\" title=\"log2FC: ' +
+        cellInfo.row['l_%1$s'] + '\">' + cellInfo.value + ' ' + d +
+        '</span>';
+    }",
+    x,
+    dir_colours[["Up"]],
+    dir_colours[["Down"]]
+  ))
+}
+
+group_cols <- lapply(contrasts, function(x) {
+  colDef(
+    name = group_lab[[x]],
+    cell = group_cell(x),
+    html = TRUE,
+    maxWidth = 110,
+    filterable = FALSE,
+    sortNALast = TRUE
+  )
+})
+names(group_cols) <- paste0("n_", contrasts)
+
+hidden_cols <- c("gene_id", paste0("d_", contrasts), paste0("l_", contrasts))
+hidden <- lapply(hidden_cols, function(col) colDef(show = FALSE))
+names(hidden) <- hidden_cols
+
+cols <- c(
+  "gene_name", "n_terms", "n_themes", "n_groups",
+  paste0("n_", contrasts), "terms", hidden_cols
+)
+
+reactable(
+  as.data.frame(lookup[, cols]),
+  columns = c(
+    list(
+      gene_name = colDef(
+        name = "Gene",
+        cell = gene_cell,
+        html = TRUE,
+        minWidth = 100
+      ),
+      n_terms = colDef(name = "GO terms", maxWidth = 90, filterable = FALSE),
+      n_themes = colDef(
+        name = "GO themes",
+        maxWidth = 100,
+        filterable = FALSE,
+        show = gene_view_themes
+      ),
+      n_groups = colDef(name = "Groups", maxWidth = 80, filterable = FALSE),
+      terms = colDef(
+        name = "Enriched GO terms",
+        minWidth = 380,
+        style = list(whiteSpace = "normal", fontSize = "0.85em")
+      )
+    ),
+    group_cols,
+    hidden
+  ),
+  filterable = TRUE,
+  defaultSorted = list(n_terms = "desc"),
+  defaultPageSize = 15,
+  striped = TRUE,
+  highlight = TRUE,
+  compact = TRUE,
+  theme = reactableTheme(cellPadding = "4px 6px")
+)
+```
+
+#### Genes × terms
+
+The heat maps show, per group, the `r HEAT_TERMS` GO terms with the smallest adjusted p-value among the up- (top) and down-regulated (bottom) genes, and the `r HEAT_GENES` genes that are part of the most of these terms. A coloured cell means the gene is part of the term, coloured by its shrunken log~2~ fold change; an empty cell means it is not. Terms and genes are ordered by clustering on shared genes, so terms built from the same genes sit next to each other: a block of near-identical rows is one signal, however many terms it shows up in. The label ends with the term's `r if (gene_view_themes) "GO theme" else "ontology"`.
+
+```{r gene-heatmap-functions}
+#| eval: !expr has_gene_view
+
+# Order of the rows of a 0/1 matrix by clustering on shared columns
+cluster_order <- function(mat) {
+  if (nrow(mat) < 3) return(rownames(mat))
+  rownames(mat)[hclust(dist(mat, method = "binary"))$order]
+}
+
+# Gene × term table of one group and direction: the HEAT_TERMS terms with
+# the smallest padj and the HEAT_GENES genes that are in the most of them
+heat_data <- function(x, dir) {
+  d <- gene_long[gene_long$contrast == x & gene_long$direction == dir, ]
+  if (nrow(d) == 0) return(d)
+
+  top_terms <- d |>
+    distinct(term_key, p.adjust) |>
+    slice_min(p.adjust, n = HEAT_TERMS, with_ties = FALSE)
+  d <- d[d$term_key %in% top_terms$term_key, ]
+
+  lfc <- lfc_all[[x]]
+  top_genes <- d |>
+    count(gene_id, name = "n") |>
+    mutate(abs_lfc = abs(unname(lfc[gene_id]))) |>
+    arrange(desc(n), desc(abs_lfc)) |>
+    head(HEAT_GENES)
+  d <- d[d$gene_id %in% top_genes$gene_id, ]
+
+  tag <- ifelse(
+    is.na(d$theme_id),
+    unname(db_short[as.character(d$database)]),
+    d$theme_id
+  )
+  d$lfc <- unname(lfc[d$gene_id])
+  d$term_lab <- paste0(wrap_text(d$Description, 45), "  [", tag, "]")
+
+  # 1 where the gene is part of the term, 0 where not
+  m <- 1 * (unclass(table(d$term_lab, d$gene_id)) > 0)
+  d$term_lab <- factor(d$term_lab, levels = cluster_order(m))
+  d$gene_id <- factor(d$gene_id, levels = cluster_order(t(m)))
+  d
+}
+
+plot_heat <- function(d, dir, lim) {
+  if (nrow(d) == 0) {
+    return(
+      ggplot() +
+        annotate(
+          "text",
+          x = 0,
+          y = 0,
+          label = "No enriched GO terms",
+          colour = "grey40"
+        ) +
+        labs(title = dir_lab[[dir]]) +
+        theme_void() +
+        theme(plot.title = element_text(face = "bold"))
+    )
+  }
+
+  gene_lab <- setNames(d$gene_name, as.character(d$gene_id))
+  gene_lab <- gene_lab[!duplicated(names(gene_lab))]
+
+  ggplot(d, aes(gene_id, term_lab, fill = lfc)) +
+    geom_tile(colour = "white", linewidth = 0.5) +
+    scale_x_discrete(labels = gene_lab) +
+    # diverging: blue down, grey 0, red up, symmetric around 0
+    scale_fill_gradient2(
+      low = dir_colours[["Down"]],
+      mid = "#f2f2f2",
+      high = dir_colours[["Up"]],
+      midpoint = 0,
+      limits = c(-lim, lim),
+      name = "Shrunken\nlog2FC"
+    ) +
+    labs(x = NULL, y = NULL, title = dir_lab[[dir]]) +
+    theme_minimal(base_size = 10) +
+    theme(
+      axis.text.x = element_text(
+        angle = 90,
+        hjust = 1,
+        vjust = 0.5,
+        face = "italic"
+      ),
+      panel.grid = element_blank(),
+      plot.title = element_text(face = "bold")
+    )
+}
+
+# Up above Down, one colour scale for both
+plot_heat_group <- function(x) {
+  d_up <- heat_data(x, "Up")
+  d_down <- heat_data(x, "Down")
+
+  lim <- suppressWarnings(max(abs(c(d_up$lfc, d_down$lfc)), na.rm = TRUE))
+  if (!is.finite(lim)) lim <- 1
+
+  (plot_heat(d_up, "Up", lim) / plot_heat(d_down, "Down", lim)) +
+    plot_layout(guides = "collect")
+}
+```
+
+```{r gene-heatmaps}
+#| eval: !expr has_gene_view
+#| output: asis
+#| fig-width: 12
+#| fig-height: 12
+
+cat("\n::: {.panel-tabset .column-page-right}\n")
+for (x in contrasts) {
+  cat("\n##### ", group_lab[[x]], "\n\n")
+  p <- plot_heat_group(x)
+  print(p)
+  if (params$export_fig) {
+    save_figure(p, name = paste0("fig-gene-heatmap-", x))
+  }
+  cat("\n")
+}
+cat("\n:::\n")
 ```
 
 ## Gene set enrichment analysis
