@@ -62,10 +62,10 @@ workflow {
     PATHWAY_ENRICHMENT ( DESEQ2.out.results, ch_annotation )
 
     // Pathway enrichment emits ORA and GSEA tables for every contrast
-    ch_enrichment = PATHWAY_ENRICHMENT.out.rds
-        .mix(PATHWAY_ENRICHMENT.out.go_themes)
+    ch_enrichment = PATHWAY_ENRICHMENT.out.ora_rds
+        .mix(PATHWAY_ENRICHMENT.out.gsea_rds, PATHWAY_ENRICHMENT.out.go_themes)
         .map { meta, rds -> rds }
-        .collect()
+        .toList()
 
     QUARTO_REPORT (
         DESEQ2.out.rds
