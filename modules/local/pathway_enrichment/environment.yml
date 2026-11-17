@@ -9,5 +9,7 @@ dependencies:
   - bioconda::bioconductor-org.hs.eg.db
   - bioconda::bioconductor-org.mm.eg.db
   - bioconda::bioconductor-reactomepa
+  - bioconda::bioconductor-go.db
+  - bioconda::bioconductor-gosemsim
   - conda-forge::r-base
   - conda-forge::r-openxlsx

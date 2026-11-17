@@ -87,24 +87,33 @@ if (params$annotation != "") {
   anno <- anno[!duplicated(anno$gene_id), ]
 }
 
-# pathway_enrichment_ora.R and pathway_enrichment_gsea.R: one Rds per
-# contrast and method, list(terms, stats, universe, settings)
+# Rds files in enrichment_dir, told apart by their suffix:
+# - *_ora.Rds and *_gsea.Rds (pathway_enrichment_ora.R and
+#   pathway_enrichment_gsea.R): one per contrast and method,
+#   list(terms, stats, universe, settings)
+# - *_go_themes.Rds (go_themes.R): optional, at most one,
+#   list(themes, settings)
 enr_dir <- resolve(params$enrichment_dir)
 enr_files <- list.files(enr_dir, pattern = "\\.Rds$", full.names = TRUE)
 
 ora_files <- grep("_ora\\.Rds$", enr_files, value = TRUE)
 gsea_files <- grep("_gsea\\.Rds$", enr_files, value = TRUE)
+themes_files <- grep("_go_themes\\.Rds$", enr_files, value = TRUE)
 
 if (length(ora_files) == 0) {
   stop("No ORA Rds files (*_ora.Rds) in: ", enr_dir)
 }
 
-other <- setdiff(enr_files, c(ora_files, gsea_files))
+other <- setdiff(enr_files, c(ora_files, gsea_files, themes_files))
 if (length(other) > 0) {
   warning(
-    "Ignored Rds files that are neither *_ora.Rds nor *_gsea.Rds: ",
+    "Ignored Rds files that are not *_ora.Rds, *_gsea.Rds or ",
+    "*_go_themes.Rds: ",
     toString(basename(other))
   )
+}
+if (length(themes_files) > 1) {
+  stop("More than one GO themes Rds: ", toString(basename(themes_files)))
 }
 
 # Read one method's Rds files and check their layout
@@ -126,6 +135,13 @@ read_enrichment <- function(files) {
 enr <- read_enrichment(ora_files)
 gsea <- read_enrichment(gsea_files)
 has_gsea <- length(gsea) > 0
+
+go_themes <- if (length(themes_files) == 1) readRDS(themes_files) else NULL
+is_themes <- is.list(go_themes) &&
+  all(c("themes", "settings") %in% names(go_themes))
+if (!is.null(go_themes) && !is_themes) {
+  stop("Not a GO themes Rds with themes and settings: ", themes_files)
+}
 
 # Enrichment contrast -> DESeq2 level: "DDS_summer_2022_vs_control" and
 # "summer_2022_vs_control" both give "summer_2022"; the longest level wins
@@ -635,6 +651,24 @@ terms <- bind_part("terms") |>
     fold = ratio_num(GeneRatio) / ratio_num(BgRatio)
   )
 
+# GO themes from go_themes.R: one theme per term, the same in every group;
+# NA for KEGG and Reactome, and for every term without a themes Rds
+use_themes <- !is.null(go_themes) && nrow(go_themes$themes) > 0
+theme_cols <- c("ONTOLOGY", "ID", "theme_id", "theme", "theme_size")
+terms <- if (use_themes) {
+  left_join(terms, go_themes$themes[, theme_cols], by = c("ONTOLOGY", "ID"))
+} else {
+  mutate(
+    terms,
+    theme_id = NA_character_,
+    theme = NA_character_,
+    theme_size = NA_integer_
+  )
+}
+
+# Theme plots replace term plots for GO when themes are available
+is_theme_db <- function(db) use_themes && startsWith(db, "GO_")
+
 # Number of groups each term is enriched in, per database and direction
 any_season <- count(terms, database, direction, ID, name = "n_seasons")
 all_seasons <- any_season[any_season$n_seasons == length(contrasts), ]
@@ -662,6 +696,43 @@ enr_text <- enum(sprintf(
   comma(n_terms_season),
   group_lab[contrasts]
 ))
+
+# "412 GO:BP terms in 57 themes, ..." over all groups and directions
+theme_text <- if (use_themes) {
+  th <- go_themes$themes
+  enum(vapply(c("BP", "MF", "CC"), function(ont) {
+    t_ont <- th[th$ONTOLOGY == ont, ]
+    sprintf(
+      "%s GO:%s terms in %s themes",
+      comma(nrow(t_ont)),
+      ont,
+      comma(length(unique(t_ont$theme_id)))
+    )
+  }, character(1)))
+} else {
+  ""
+}
+
+theme_method <- if (use_themes) {
+  cfg <- go_themes$settings
+  paste0(
+    "GO terms describing the same biology were grouped into themes by ",
+    "semantic similarity, with the R-package GOSemSim (v",
+    cfg$versions[["GOSemSim"]], "; Yu et al., 2010) and the \"",
+    cfg$measure, "\" measure. The enriched GO terms of all groups and ",
+    "directions were pooled before grouping, so that a theme contains the ",
+    "same terms in every group and the groups can be compared by theme. ",
+    "Per ontology, the terms were clustered by complete linkage of ",
+    "1 − similarity and the tree was cut at ", cfg$threshold,
+    ", as in the R-package rrvgo ([Sayols, 2023]",
+    "(https://doi.org/10.17912/micropub.biology.000811)), so every pair of ",
+    "terms in a theme has a similarity of at least ", 1 - cfg$threshold,
+    ". Each theme is named after its term with the smallest adjusted ",
+    "p-value in any group."
+  )
+} else {
+  ""
+}
 ```
 
 ::: {.callout-note title="Method" collapse=true}
@@ -671,6 +742,8 @@ To investigate whether biological functions, processes or pathways were over-rep
 Each group was tested three times: with its up-regulated DEGs, its down-regulated DEGs and both directions together (padj < `r enr_cfg$gene_alpha`). Testing the directions separately is more sensitive, since a pathway whose genes change in both directions is diluted when they are tested together ([Hong et al., 2014](https://doi.org/10.1098/rsif.2013.0950)). The background (universe) was all genes in that group's DESeq2 results table, i.e. the genes that passed the gene filter, rather than the whole genome, which would favour terms whose genes are simply expressed in the tissue ([Timmons et al., 2015](https://doi.org/10.1186/s13059-015-0761-7)).
 
 GO was tested with the Ensembl gene IDs; for KEGG and Reactome, the IDs were mapped to Entrez IDs with `r enr_cfg$orgdb` (v`r enr_cfg$versions[["orgdb"]]`), which `r sprintf("%.0f–%.0f", entrez_pct[1], entrez_pct[2])` % of the background had (@tbl-enrichment-sets). Gene sets of 10–500 genes were tested, clusterProfiler's default. P-values were adjusted for multiple testing using the Benjamini–Hochberg method, for GO over the three ontologies together, and terms with an adjusted p-value < `r enr_cfg$alpha` were considered significant. Terms supported by fewer than `r enr_cfg$min_count` genes from the input list were excluded.
+
+`r theme_method`
 
 ```{r tbl-enrichment-sets}
 #| tbl-cap: !expr paste0("Genes in the enrichment tests per group. The direction columns show the DEGs (padj < ", enr_cfg$gene_alpha, ") that were tested. Background is all genes in the group's results table, and Entrez the number of those with an Entrez ID, which KEGG and Reactome are tested with.")
@@ -731,7 +804,7 @@ rbind(
 
 ### Shared between groups
 
-The figures below compare the enriched terms across the groups, one tab per database. Each row is a term and each column a group, so a term enriched in every group has a point in every column; terms enriched in the most groups are at the top of each panel. The up- and down-regulated DEGs are shown in separate panels.
+The figures below compare the enriched terms across the groups, one tab per database. Each row is a term and each column a group, so a term enriched in every group has a point in every column; terms enriched in the most groups are at the top of each panel. The up- and down-regulated DEGs are shown in separate panels. `r if (use_themes) paste0("GO terms are often redundant, with many terms describing the same biology, so the GO tabs show themes of similar terms instead of single terms: across all groups and directions, the enriched terms formed ", theme_text, ". The terms of each theme are listed in the interactive tables below.") else ""`
 
 ```{r enrichment-dotplot-functions}
 # terms per group and direction in the dot plots
@@ -746,11 +819,26 @@ wrap_text <- function(x, width = 55) {
   )
 }
 
-# Top terms per group and direction, plus every other group they are
-# enriched in; one row per term and group
+# One row per theme, group and direction: the best padj and the number of
+# the theme's terms enriched there. The label shows the theme's total size.
+theme_rows <- function(d) {
+  d |>
+    filter(!is.na(theme_id)) |>
+    group_by(contrast, direction, theme_id, theme, theme_size) |>
+    summarise(p.adjust = min(p.adjust), size = n(), .groups = "drop") |>
+    mutate(
+      ID = theme_id,
+      Description = sprintf("%s (%d)", theme, theme_size)
+    )
+}
+
+# Top terms (or GO themes) per group and direction, plus every other group
+# they are enriched in; one row per term and group
 dot_data <- function(db) {
   d <- terms[terms$database == db & terms$direction != "Both", ]
   if (nrow(d) == 0) return(d)
+
+  d <- if (is_theme_db(db)) theme_rows(d) else mutate(d, size = fold)
 
   top <- d |>
     group_by(contrast, direction) |>
@@ -798,9 +886,19 @@ plot_dots <- function(db) {
   rows <- d[!duplicated(d$row), ]
   y_lab <- setNames(wrap_text(rows$Description), as.character(rows$row))
 
+  size_scale <- if (is_theme_db(db)) {
+    scale_size_continuous(
+      range = c(2, 7),
+      name = "Enriched\nterms",
+      breaks = function(l) unique(pmax(1, round(scales::breaks_pretty(4)(l))))
+    )
+  } else {
+    scale_size_continuous(range = c(2, 7), name = "Fold\nenrichment")
+  }
+
   ggplot(d, aes(contrast, row)) +
     geom_point(
-      aes(size = fold, fill = -log10(p.adjust)),
+      aes(size = size, fill = -log10(p.adjust)),
       shape = 21,
       colour = "grey20",
       stroke = 0.3
@@ -813,7 +911,7 @@ plot_dots <- function(db) {
     ) +
     scale_x_discrete(labels = lab_fun, drop = FALSE) +
     scale_y_discrete(labels = y_lab) +
-    scale_size_continuous(range = c(2, 7), name = "Fold\nenrichment") +
+    size_scale +
     # one-hue sequential ramp: light = least, dark = most significant
     scale_fill_gradient(
       low = "#b7d3f6",
@@ -829,6 +927,20 @@ plot_dots <- function(db) {
 }
 
 dot_cap <- function(db) {
+  if (is_theme_db(db)) {
+    return(paste0(
+      db_lab[[db]], " themes enriched among the up- (top) and ",
+      "down-regulated (bottom) DEGs of each group, compared with ", ref,
+      ". A theme groups semantically similar GO terms and is named after ",
+      "its most significant term, with its number of terms in parentheses. ",
+      "The ", TOP_TERMS, " themes with the smallest adjusted p-value per ",
+      "group and direction are shown, together with every other group the ",
+      "theme is enriched in. Point size shows how many of the theme's terms ",
+      "are enriched in that group, and colour the smallest adjusted p-value ",
+      "among them; no point means none of its terms is enriched in that group."
+    ))
+  }
+
   paste0(
     db_lab[[db]], " terms enriched among the up- (top) and down-regulated ",
     "(bottom) DEGs of each group, compared with ", ref, ". The ", TOP_TERMS,
@@ -902,7 +1014,7 @@ print(p); if (params$export_fig) save_figure(p)
 ### Enriched terms per group
 
 ::: {.callout-tip title="Interactive table"}
-The tables below have a drop-down menu which shows the genes included in the gene set, ranked by their shrunken log~2~ fold change. Click on the arrow ▶ on the left side of each row to reveal the genes. Gene names link to the corresponding [NCBI gene page](https://www.ncbi.nlm.nih.gov/gene/). The tooltip (appears when hovering) shows the log~2~ fold change of the gene in that group; red is up-regulated and blue down-regulated.
+The tables below have a drop-down menu which shows the genes included in the gene set, ranked by their shrunken log~2~ fold change. Click on the arrow ▶ on the left side of each row to reveal the genes. Gene names link to the corresponding [NCBI gene page](https://www.ncbi.nlm.nih.gov/gene/). The tooltip (appears when hovering) shows the log~2~ fold change of the gene in that group; red is up-regulated and blue down-regulated. `r if (use_themes) "The GO theme column shows which theme each GO term belongs to; type a theme ID, e.g. BP-003, in its filter box to list all of its terms." else ""`
 :::
 
 ```{r enrichment-table-functions}
@@ -965,9 +1077,18 @@ enrichment_table <- function(x, dir) {
   d <- d[order(d$database, d$p.adjust), ]
   d$source <- unname(db_short[as.character(d$database)])
 
+  # GO theme as "BP-003: representative term"; empty for KEGG and Reactome
+  d$theme_lab <- ifelse(
+    is.na(d$theme_id),
+    "",
+    paste0(d$theme_id, ": ", d$theme)
+  )
+
   lfc <- lfc_lookup(x)
   tbl_id <- paste("enr", x, dir, sep = "-")
-  cols <- c("source", "Description", "ID", "Count", "fold", "p.adjust")
+  cols <- c(
+    "source", "Description", "theme_lab", "ID", "Count", "fold", "p.adjust"
+  )
 
   reactable(
     as.data.frame(d[, cols]),
@@ -981,6 +1102,11 @@ enrichment_table <- function(x, dir) {
         }
       ),
       Description = colDef(name = "Term", minWidth = 220),
+      theme_lab = colDef(
+        name = "GO theme",
+        minWidth = 180,
+        show = use_themes
+      ),
       ID = colDef(name = "Term ID", maxWidth = 150),
       Count = colDef(maxWidth = 70),
       fold = colDef(

@@ -3,11 +3,14 @@
  * as one task per contrast and method:
  *   - ORA: over-representation of the significant genes (Up, Down, Both)
  *   - GSEA: all genes ranked by one score, no significance cutoff
- * Either method can be switched off with params.enrichment_methods
+ * Either method can be switched off with params.enrichment_methods.
+ * The enriched GO terms of all ORA tasks are then grouped into themes
+ * (GO_THEMES), once, so a theme is the same in every contrast.
  */
 
 include { PATHWAY_ENRICHMENT_ORA  } from '../../../modules/local/pathway_enrichment/ora'
 include { PATHWAY_ENRICHMENT_GSEA } from '../../../modules/local/pathway_enrichment/gsea'
+include { GO_THEMES               } from '../../../modules/local/pathway_enrichment/go_themes'
 
 workflow PATHWAY_ENRICHMENT {
 
@@ -32,7 +35,22 @@ workflow PATHWAY_ENRICHMENT {
     ch_versions = ch_versions.mix(PATHWAY_ENRICHMENT_ORA.out.versions.first())
 
     PATHWAY_ENRICHMENT_GSEA ( ch_contrasts, ch_annotation )
-    ch_versions = ch_versions.mix(PATHWAY_ENRICHMENT_ORA.out.versions.first())
+    ch_versions = ch_versions.mix(PATHWAY_ENRICHMENT_GSEA.out.versions.first())
+
+    // All ORA results together, with the meta of the results input:
+    // [ [id: 'DDS'], [ Rds, ... ] ]. Without ORA results nothing is emitted,
+    // so GO_THEMES doesn't run
+    ch_themes_input = ch_results
+        .map { meta, _tsvs -> meta }
+        .combine(
+            PATHWAY_ENRICHMENT_ORA.out.rds
+                .map { _meta, rds -> rds }
+                .collect()
+                .map { files -> [files] }
+        )
+
+    GO_THEMES ( ch_themes_input )
+    ch_versions = ch_versions.mix ( GO_THEMES.out.versions )
 
     emit:
     ora_tsv   = PATHWAY_ENRICHMENT_ORA.out.tsv   // channel: [ meta, tsv ]
@@ -41,5 +59,6 @@ workflow PATHWAY_ENRICHMENT {
     gsea_tsv  = PATHWAY_ENRICHMENT_GSEA.out.tsv  // channel: [ meta, tsv ]
     gsea_xlsx = PATHWAY_ENRICHMENT_GSEA.out.xlsx // channel: [ meta, xlsx ]
     gsea_rds  = PATHWAY_ENRICHMENT_GSEA.out.rds  // channel: [ meta, Rds ]
+    go_themes = GO_THEMES.out.rds                // channel: [ meta, Rds ]
     versions  = ch_versions                      // channel: [ versions.yml ]
 }
