@@ -51,13 +51,10 @@ project/
 
 ## Metadata
 
-The pipeline requires a metadata file with columns: `sample`. Pipeline defaults to path: `data/metadata.csv`, but can be manually set: `--metadata 'path/to/metadata.csv'`. The DESeq2 formula design is decided by a column name and is passed with `--deseq2_design 'column-name'`.
+The pipeline requires a metadata `csv`-file with two columns: `sample` and
+`group`. Any additional column are treated as extra variables.
 
-```sh
-nextflow run andreyhgl/transcriptome-analysis \
-  --metadata 'path/to/metadata.csv' \
-  --deseq2_design 'column-name'
-```
+The DESeq2 formula design is decided by a column name and is passed with `--deseq2_design 'column-name'`. Defaults to `group`.
 
 ```
 # metadata.csv
@@ -69,6 +66,14 @@ sample,group,season,year,concentration
 4,summer,summer,2022,200
 5,autumn,autumn,2022,200
 6,winter,winter,2023,200
+```
+
+Pipeline defaults to path: `data/metadata.csv`, but can be manually set: `--metadata 'path/to/metadata.csv'`. 
+
+```sh
+nextflow run andreyhgl/transcriptome-analysis \
+  --metadata 'path/to/metadata.csv' \
+  --deseq2_design 'column-name'
 ```
 
 ## Quantification files
@@ -116,7 +121,7 @@ The results are written to `<outdir>/sample_qc/`:
 To preview the report or the dashboard locally:
 
 ```sh
-quarto preview assets/quarto_dashboard/sample_qc_dashboard.qmd \
+quarto preview assets/quarto_report/sample_qc.qmd \
   -P qc:<outdir>/sample_qc/sample_qc.Rds
 ```
 
