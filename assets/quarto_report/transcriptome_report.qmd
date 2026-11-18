@@ -357,7 +357,13 @@ pct_var <- 100 * attr(pca, "percentVar")
 names(pca)[names(pca) == "name"] <- "sample"
 ```
 
-The first two principal components of the `r comma(min(PCA_NTOP, n_genes))` most variable genes explain `r sprintf("%.1f", pct_var[1])` % and `r sprintf("%.1f", pct_var[2])` % of the variance, see @fig-pca.
+The first two principal components of the **`r comma(min(PCA_NTOP, n_genes))`** most variable genes explaining **`r sprintf("%.1f", pct_var[1])` %** and **`r sprintf("%.1f", pct_var[2])` %** of the variance, see @fig-pca.
+
+@fig-sample-dist shows the same samples as distances between every pair, clustered so that the most similar samples sit next to each other. Samples of one group that cluster together share an expression profile. A sample that clusters away from its group, or samples that cluster by something other than their group, can point to an outlier or a batch effect.
+
+::: {.panel-tabset}
+
+### PCA
 
 ```{r fig-pca}
 #| fig-cap: !expr paste0("Principal component analysis of the variance-stabilised counts (vst, blind to the design) of the ", comma(min(PCA_NTOP, n_genes)), " most variable genes, after the gene filter of DESEQ2_DDS. Labels show the sample number.")
@@ -387,6 +393,124 @@ p <- ggplot(
 
 print(p); if (params$export_fig) save_figure(p)
 ```
+
+### Sample distances
+
+```{r fig-sample-dist}
+#| fig-cap: !expr paste0("Sample-to-sample distances. Euclidean distances between the variance-stabilised counts (vst, blind to the design) of all ", comma(n_genes), " genes after the gene filter of DESEQ2_DDS. Samples are ordered by hierarchical clustering (complete linkage), shown by the dendrogram. Darker means more similar; the colour strips show each sample's group.")
+#| fig-width: 9
+#| fig-height: 9
+
+# Euclidean distances between samples, as in the DESeq2 vignette
+sample_dist <- dist(t(assay(vsd)))
+sample_hc <- hclust(sample_dist, method = "complete")
+samples <- sample_hc$labels[sample_hc$order]
+n_samples <- length(samples)
+sample_grp <- setNames(dds[[group_var]], colnames(dds))
+
+# Segments of the dendrogram, with the leaves at x = 1, 2, ... in the
+# clustering order, as the columns of the heat map
+dendro_segments <- function(hc) {
+  n <- length(hc$order)
+  leaf_x <- integer(n)
+  leaf_x[hc$order] <- seq_len(n)
+  node_x <- numeric(n - 1)
+
+  # merge: negative = a leaf, positive = an earlier merge
+  pos <- function(i) {
+    if (i < 0) c(leaf_x[-i], 0) else c(node_x[i], hc$height[i])
+  }
+
+  segs <- lapply(seq_len(n - 1), function(k) {
+    a <- pos(hc$merge[k, 1])
+    b <- pos(hc$merge[k, 2])
+    h <- hc$height[k]
+    node_x[k] <<- (a[1] + b[1]) / 2
+
+    data.frame(
+      x = c(a[1], b[1], a[1]),
+      xend = c(a[1], b[1], b[1]),
+      y = c(a[2], b[2], h),
+      yend = c(h, h, h)
+    )
+  })
+
+  do.call(rbind, segs)
+}
+
+# Long table of the distance matrix; the first sample of the order at the
+# top left
+dist_mat <- as.matrix(sample_dist)
+dist_df <- data.frame(
+  x = factor(rep(colnames(dist_mat), each = nrow(dist_mat)), levels = samples),
+  y = factor(
+    rep(rownames(dist_mat), times = ncol(dist_mat)),
+    levels = rev(samples)
+  ),
+  dist = as.vector(dist_mat)
+)
+
+p_dendro <- ggplot(dendro_segments(sample_hc)) +
+  geom_segment(
+    aes(x = x, y = y, xend = xend, yend = yend),
+    linewidth = 0.4,
+    colour = "grey30"
+  ) +
+  scale_x_continuous(limits = c(0.5, n_samples + 0.5), expand = c(0, 0)) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.05))) +
+  theme_void()
+
+strip_df <- data.frame(sample = samples, group = sample_grp[samples])
+
+p_top <- ggplot(
+  strip_df,
+  aes(factor(sample, levels = samples), 1, fill = group)
+) +
+  geom_tile() +
+  scale_fill_manual(values = group_colours, labels = lab_fun, name = NULL) +
+  scale_x_discrete(expand = c(0, 0)) +
+  theme_void()
+
+p_left <- ggplot(
+  strip_df,
+  aes(1, factor(sample, levels = rev(samples)), fill = group)
+) +
+  geom_tile() +
+  scale_fill_manual(values = group_colours, guide = "none") +
+  scale_y_discrete(expand = c(0, 0)) +
+  theme_void()
+
+p_heat <- ggplot(dist_df, aes(x, y, fill = dist)) +
+  geom_tile() +
+  # one-hue sequential ramp: dark = small distance, i.e. similar samples
+  scale_fill_gradient(
+    low = "#0d366b",
+    high = "#eef4fc",
+    name = "Distance"
+  ) +
+  scale_x_discrete(expand = c(0, 0)) +
+  scale_y_discrete(position = "right", expand = c(0, 0)) +
+  labs(x = NULL, y = NULL) +
+  theme_minimal(base_size = 10) +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+    panel.grid = element_blank()
+  )
+
+p <- wrap_plots(
+  plot_spacer(), p_dendro,
+  plot_spacer(), p_top,
+  p_left, p_heat,
+  ncol = 2,
+  widths = c(0.04, 1),
+  heights = c(0.2, 0.04, 1),
+  guides = "collect"
+)
+
+print(p); if (params$export_fig) save_figure(p)
+```
+
+:::
 
 ## Descriptive statistics
 
