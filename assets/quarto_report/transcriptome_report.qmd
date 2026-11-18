@@ -280,7 +280,7 @@ dir_colours <- c(Up = "#c0392b", Down = "#2c5f8a")
 ```
 
 ```{r significance-tbl}
-res$sign <- !is.na(res$padj) & res$padj < Q_CUT
+res$sign <- !is.na(res$padj) & res$padj < Q_CUT & abs(res$log2fc) > LFC
 res$direction <- ifelse(res$log2fc > 0, "Up", "Down")
 sig <- res[res$sign, ]
 
@@ -551,11 +551,11 @@ rbind(
 
 ### Differentially expressed genes
 
-Of the `r comma(n_genes)` tested genes that passed the gene filter, `r enum(count_text())` passed the significance threshold (padj < `r Q_CUT`, lfc > `r LFC`). In total, **`r comma(n_union)` unique DEGs** were found in at least one group.
+Of the `r comma(n_genes)` tested genes that passed the gene filter, `r enum(count_text())` passed the significance threshold (padj < `r Q_CUT`, lfc > `r LFC`). In total, **`r comma(n_union)` distinct DEGs** were found in at least one group.
 
 ```{r annot-pie-functions}
 # Gene annotation column shown in the pies, e.g. "gene_type" or "chr"
-var <- "gene_type"
+var <- "gene_type2"
 
 # Classes with their own colour; the rest are pooled as "other", so every
 # slice has a colour and the legend stays short
@@ -693,9 +693,9 @@ pie_figure <- function(var, palette = "Set2", name = "Gene type") {
     build_counts(s$com, var, "Common")
   )
 
-  # classes from most to fewest genes, "unknown" last, same in A and B
   # the PIE_MAX_CLASSES largest classes over all pies keep their own
-  # colour, from most to fewest genes; then "other" and "unknown"
+  # colour, from most to fewest genes; then "other" and "unknown", each only
+  # when some pie has it, so absent ones stay out of the legend
   by_size <- both |>
     count(class, wt = n) |>
     arrange(desc(n)) |>
@@ -734,7 +734,7 @@ pie_figure <- function(var, palette = "Set2", name = "Gene type") {
 
 ```{r fig-annot-pies}
 #| eval: !expr has_annot_var
-#| fig-cap: !expr paste0("Gene types of the DEGs (padj < ", Q_CUT, "), by group and for the DEGs in common (columns), compared with ", ref, ". (A) Both directions combined; common DEGs are those significant in all groups. (B) Split by direction (rows); common DEGs are counted once, and only when they change in the same direction in all groups. Gene types are from the Ensembl annotation; types outside the ", PIE_MAX_CLASSES, " largest are pooled as other. Percentages are within each pie, and n above each pie is its total.")
+#| fig-cap: !expr paste0("Gene types of the DEGs (padj < ", Q_CUT, "), by group and for the DEGs in common (columns), compared with ", ref, ". (A) Both directions combined; common DEGs are those significant in all groups. (B) Split by direction (rows); common DEGs are counted once, and only when they change in the same direction in all groups. Gene types are from the Ensembl annotation; types outside the ", PIE_MAX_CLASSES, " largest are pooled as other. Percentages are within each pie, and _n_ above each pie is its total.")
 #| fig-width: 12
 #| fig-height: 9
 #| column: page-right
@@ -743,7 +743,6 @@ p <- pie_figure(var, palette = "Set2", name = "Gene type")
 
 print(p); if (params$export_fig) save_figure(p)
 ```
-
 
 `r comma(length(ids_unique))` DEGs (`r pct(length(ids_unique), n_union)` %) were significant in one group only: `r enum(count_text(ids_unique))`. `r comma(n_shared)` DEGs (`r pct(n_shared, n_union)` %) were shared by at least two groups, and of these `r comma(n_shared_same)` (`r pct(n_shared_same, n_shared)` %) changed in the same direction in every group they were significant in. `r comma(n_all)` DEGs were significant in all `r length(contrasts)` groups, `r comma(n_all_same)` of them in the same direction (@fig-venn, @tbl-intersections).
 
@@ -885,7 +884,11 @@ sig |>
   arrange(max_padj) |>
   head(TOP_N) |>
   mutate(
-    Gene = paste0("*", gene_label(gene_id), "*"),
+    Gene = sprintf(
+      "[*%s*](https://www.ncbi.nlm.nih.gov/gene/?term=%s)",
+      gene_label(gene_id),
+      gene_id
+    ),
     max_padj = signif(max_padj, 3)
   ) |>
   select(
