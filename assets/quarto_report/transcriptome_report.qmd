@@ -86,6 +86,16 @@ if (params$annotation != "") {
   sep <- if (grepl("\\.csv(\\.gz)?$", path)) "," else "\t"
   anno <- read.delim(path, sep = sep)
   anno <- anno[!duplicated(anno$gene_id), ]
+
+  # Keep only genes in the annotation, e.g. dropping genes on scaffolds or
+  # patches that the annotation leaves out. Version suffixes are ignored
+  strip <- function(x) sub("^(ENS[A-Z]*G[0-9]+)\\.[0-9]+$", "\\1", x)
+  in_anno <- strip(res$gene_id) %in% strip(anno$gene_id)
+  message(
+    "Genes not in the annotation, removed from res: ",
+    length(unique(res$gene_id[!in_anno]))
+  )
+  res <- res[in_anno, ]
 }
 
 # pathway_enrichment_ora.R and pathway_enrichment_gsea.R: one Rds per
