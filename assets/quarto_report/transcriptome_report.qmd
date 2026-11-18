@@ -359,14 +359,14 @@ names(pca)[names(pca) == "name"] <- "sample"
 
 The first two principal components of the **`r comma(min(PCA_NTOP, n_genes))`** most variable genes explaining **`r sprintf("%.1f", pct_var[1])` %** and **`r sprintf("%.1f", pct_var[2])` %** of the variance, see @fig-pca.
 
-@fig-sample-dist shows the same samples as distances between every pair, clustered so that the most similar samples sit next to each other. Samples of one group that cluster together share an expression profile. A sample that clusters away from its group, or samples that cluster by something other than their group, can point to an outlier or a batch effect.
+@fig-sample-dist shows the same samples as distances between every pair, clustered so that the most similar samples sit next to each other. Samples of one group that cluster together share an expression profile. A sample that clusters away from its group, can point to an outlier or a batch effect.
 
 ::: {.panel-tabset}
 
 ### PCA
 
 ```{r fig-pca}
-#| fig-cap: !expr paste0("Principal component analysis of the variance-stabilised counts (vst, blind to the design) of the ", comma(min(PCA_NTOP, n_genes)), " most variable genes, after the gene filter of DESEQ2_DDS. Labels show the sample number.")
+#| fig-cap: !expr paste0("Principal component analysis of the variance-stabilised counts (vst, blind to the design) of the ", comma(min(PCA_NTOP, n_genes)), " most variable genes (after filtering steps). Labels show the sample number.")
 #| fig-width: 7
 #| fig-height: 6
 
@@ -374,7 +374,7 @@ p <- ggplot(
   pca,
   aes(PC1, PC2, fill = .data[[group_var]], shape = .data[[group_var]])
 ) +
-  geom_point(size = 5, stroke = 0.5, alpha = 0.8) +
+  geom_point(size = 5, stroke = 0.5, alpha = 1) +
   geom_text_repel(
     aes(label = sample),
     size = 3,
@@ -397,7 +397,7 @@ print(p); if (params$export_fig) save_figure(p)
 ### Sample distances
 
 ```{r fig-sample-dist}
-#| fig-cap: !expr paste0("Sample-to-sample distances. Euclidean distances between the variance-stabilised counts (vst, blind to the design) of all ", comma(n_genes), " genes after the gene filter of DESEQ2_DDS. Samples are ordered by hierarchical clustering (complete linkage), shown by the dendrogram. Darker means more similar; the colour strips show each sample's group.")
+#| fig-cap: !expr paste0("Sample-to-sample distances. Euclidean distances between the variance-stabilised counts (vst, blind to the design) of all ", comma(n_genes), " genes (after filtering steps). Samples are ordered by hierarchical clustering (complete linkage), shown by the dendrogram. Darker means more similar; the colour strips show each sample's group.")
 #| fig-width: 9
 #| fig-height: 9
 
@@ -466,7 +466,7 @@ p_top <- ggplot(
   strip_df,
   aes(factor(sample, levels = samples), 1, fill = group)
 ) +
-  geom_tile() +
+  geom_tile(colour = "black", linewidth = 0.3) +
   scale_fill_manual(values = group_colours, labels = lab_fun, name = NULL) +
   scale_x_discrete(expand = c(0, 0)) +
   theme_void()
@@ -475,13 +475,13 @@ p_left <- ggplot(
   strip_df,
   aes(1, factor(sample, levels = rev(samples)), fill = group)
 ) +
-  geom_tile() +
+  geom_tile(colour = "black", linewidth = 0.3) +
   scale_fill_manual(values = group_colours, guide = "none") +
   scale_y_discrete(expand = c(0, 0)) +
   theme_void()
 
 p_heat <- ggplot(dist_df, aes(x, y, fill = dist)) +
-  geom_tile() +
+  geom_tile(colour = "black", linewidth = 0.3) +
   # one-hue sequential ramp: dark = small distance, i.e. similar samples
   scale_fill_gradient(
     low = "#0d366b",
@@ -491,7 +491,7 @@ p_heat <- ggplot(dist_df, aes(x, y, fill = dist)) +
   scale_x_discrete(expand = c(0, 0)) +
   scale_y_discrete(position = "right", expand = c(0, 0)) +
   labs(x = NULL, y = NULL) +
-  theme_minimal(base_size = 10) +
+  theme_minimal(base_size = 13) +
   theme(
     axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
     panel.grid = element_blank()
