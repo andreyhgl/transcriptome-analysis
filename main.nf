@@ -63,7 +63,7 @@ workflow {
 
     // Pathway enrichment emits ORA and GSEA tables for every contrast
     ch_enrichment = PATHWAY_ENRICHMENT.out.ora_rds
-        .mix(PATHWAY_ENRICHMENT.out.gsea_rds)
+        .mix(PATHWAY_ENRICHMENT.out.gsea_rds, PATHWAY_ENRICHMENT.out.go_themes)
         .map { meta, rds -> rds }
         .toList()
 

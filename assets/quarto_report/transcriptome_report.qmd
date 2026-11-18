@@ -12,6 +12,7 @@ params:
   enrichment_dir: "analysis/pathway_enrichment"
   # adjusted p-value cut-off; 0 = use the alpha from DESEQ2_RESULTS
   alpha: 0
+  lfc: 0
   export_fig: false
 ---
 
@@ -85,6 +86,16 @@ if (params$annotation != "") {
   sep <- if (grepl("\\.csv(\\.gz)?$", path)) "," else "\t"
   anno <- read.delim(path, sep = sep)
   anno <- anno[!duplicated(anno$gene_id), ]
+
+  # Keep only genes in the annotation, e.g. dropping genes on scaffolds or
+  # patches that the annotation leaves out. Version suffixes are ignored
+  strip <- function(x) sub("^(ENS[A-Z]*G[0-9]+)\\.[0-9]+$", "\\1", x)
+  in_anno <- strip(res$gene_id) %in% strip(anno$gene_id)
+  message(
+    "Genes not in the annotation, removed from res: ",
+    length(unique(res$gene_id[!in_anno]))
+  )
+  res <- res[in_anno, ]
 }
 
 # pathway_enrichment_ora.R and pathway_enrichment_gsea.R: one Rds per
@@ -153,6 +164,7 @@ lvl_map <- setNames(vapply(enr_contrasts, match_level, ""), enr_contrasts)
 ```{r parameters}
 # adjusted p-value, the same as in DESEQ2_RESULTS unless set in params
 Q_CUT <- if (params$alpha > 0) params$alpha else summ$alpha[1]
+LFC <- if (params$lfc > 0) params$lfc else 0
 
 # genes listed in the "shared by all groups" table
 TOP_N <- 50
@@ -278,7 +290,7 @@ dir_colours <- c(Up = "#c0392b", Down = "#2c5f8a")
 ```
 
 ```{r significance-tbl}
-res$sign <- !is.na(res$padj) & res$padj < Q_CUT
+res$sign <- !is.na(res$padj) & res$padj < Q_CUT & abs(res$log2fc) > LFC
 res$direction <- ifelse(res$log2fc > 0, "Up", "Down")
 sig <- res[res$sign, ]
 
@@ -357,10 +369,16 @@ pct_var <- 100 * attr(pca, "percentVar")
 names(pca)[names(pca) == "name"] <- "sample"
 ```
 
-The first two principal components of the `r comma(min(PCA_NTOP, n_genes))` most variable genes explain `r sprintf("%.1f", pct_var[1])` % and `r sprintf("%.1f", pct_var[2])` % of the variance, see @fig-pca.
+The first two principal components of the **`r comma(min(PCA_NTOP, n_genes))`** most variable genes explaining **`r sprintf("%.1f", pct_var[1])` %** and **`r sprintf("%.1f", pct_var[2])` %** of the variance, see @fig-pca.
+
+@fig-sample-dist shows the same samples as distances between every pair, clustered so that the most similar samples sit next to each other. Samples of one group that cluster together share an expression profile. A sample that clusters away from its group, can point to an outlier or a batch effect.
+
+::: {.panel-tabset}
+
+### PCA
 
 ```{r fig-pca}
-#| fig-cap: !expr paste0("Principal component analysis of the variance-stabilised counts (vst, blind to the design) of the ", comma(min(PCA_NTOP, n_genes)), " most variable genes, after the gene filter of DESEQ2_DDS. Labels show the sample number.")
+#| fig-cap: !expr paste0("Principal component analysis of the variance-stabilised counts (vst, blind to the design) of the ", comma(min(PCA_NTOP, n_genes)), " most variable genes (after filtering steps). Labels show the sample number.")
 #| fig-width: 7
 #| fig-height: 6
 
@@ -368,11 +386,11 @@ p <- ggplot(
   pca,
   aes(PC1, PC2, fill = .data[[group_var]], shape = .data[[group_var]])
 ) +
-  geom_point(size = 5, stroke = 0.5, alpha = 0.8) +
+  geom_point(size = 5, stroke = 0.5, alpha = 1) +
   geom_text_repel(
     aes(label = sample),
     size = 3,
-    colour = "grey30",
+    colour = "black",
     max.overlaps = Inf,
     seed = 1337
   ) +
@@ -382,18 +400,137 @@ p <- ggplot(
     x = sprintf("PC1 (%.1f%%)", pct_var[1]),
     y = sprintf("PC2 (%.1f%%)", pct_var[2])
   ) +
-  theme_bw(base_size = 12) +
+  theme_bw(base_size = 13) +
   theme(legend.position = "bottom")
 
 print(p); if (params$export_fig) save_figure(p)
 ```
+
+### Sample distances
+
+```{r fig-sample-dist}
+#| fig-cap: !expr paste0("Sample-to-sample distances. Euclidean distances between the variance-stabilised counts (vst, blind to the design) of all ", comma(n_genes), " genes (after filtering steps). Samples are ordered by hierarchical clustering (complete linkage), shown by the dendrogram. Darker means more similar; the colour strips show each sample's group.")
+#| fig-width: 9
+#| fig-height: 9
+
+# Euclidean distances between samples, as in the DESeq2 vignette
+sample_dist <- dist(t(assay(vsd)))
+sample_hc <- hclust(sample_dist, method = "complete")
+samples <- sample_hc$labels[sample_hc$order]
+n_samples <- length(samples)
+sample_grp <- setNames(dds[[group_var]], colnames(dds))
+
+# Segments of the dendrogram, with the leaves at x = 1, 2, ... in the
+# clustering order, as the columns of the heat map
+dendro_segments <- function(hc) {
+  n <- length(hc$order)
+  leaf_x <- integer(n)
+  leaf_x[hc$order] <- seq_len(n)
+  node_x <- numeric(n - 1)
+
+  # merge: negative = a leaf, positive = an earlier merge
+  pos <- function(i) {
+    if (i < 0) c(leaf_x[-i], 0) else c(node_x[i], hc$height[i])
+  }
+
+  segs <- lapply(seq_len(n - 1), function(k) {
+    a <- pos(hc$merge[k, 1])
+    b <- pos(hc$merge[k, 2])
+    h <- hc$height[k]
+    node_x[k] <<- (a[1] + b[1]) / 2
+
+    data.frame(
+      x = c(a[1], b[1], a[1]),
+      xend = c(a[1], b[1], b[1]),
+      y = c(a[2], b[2], h),
+      yend = c(h, h, h)
+    )
+  })
+
+  do.call(rbind, segs)
+}
+
+# Long table of the distance matrix; the first sample of the order at the
+# top left
+dist_mat <- as.matrix(sample_dist)
+dist_df <- data.frame(
+  x = factor(rep(colnames(dist_mat), each = nrow(dist_mat)), levels = samples),
+  y = factor(
+    rep(rownames(dist_mat), times = ncol(dist_mat)),
+    levels = rev(samples)
+  ),
+  dist = as.vector(dist_mat)
+)
+
+p_dendro <- ggplot(dendro_segments(sample_hc)) +
+  geom_segment(
+    aes(x = x, y = y, xend = xend, yend = yend),
+    linewidth = 0.4,
+    colour = "grey30"
+  ) +
+  scale_x_continuous(limits = c(0.5, n_samples + 0.5), expand = c(0, 0)) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.05))) +
+  theme_void()
+
+strip_df <- data.frame(sample = samples, group = sample_grp[samples])
+
+p_top <- ggplot(
+  strip_df,
+  aes(factor(sample, levels = samples), 1, fill = group)
+) +
+  geom_tile(colour = "black", linewidth = 0.3) +
+  scale_fill_manual(values = group_colours, labels = lab_fun, name = "Groups") +
+  scale_x_discrete(expand = c(0, 0)) +
+  theme_void(base_size = 13)
+
+p_left <- ggplot(strip_df,
+    aes(1, factor(sample, levels = rev(samples)), fill = group)) +
+  geom_tile(colour = "black", linewidth = 0.3) +
+  scale_fill_manual(values = group_colours, guide = "none") +
+  scale_y_discrete(expand = c(0, 0)) +
+  theme_void()
+
+p_heat <- ggplot(dist_df, aes(x, y, fill = dist)) +
+  geom_tile(colour = "black", linewidth = 0.3) +
+  # one-hue sequential ramp: dark = small distance, i.e. similar samples
+  scale_fill_gradient(
+    low = "#0d366b",
+    high = "#eef4fc",
+    name = "Distance"
+  ) +
+  scale_x_discrete(expand = c(0, 0)) +
+  scale_y_discrete(position = "right", expand = c(0, 0)) +
+  labs(x = NULL, y = NULL) +
+  theme_bw(base_size = 13) +
+  theme(
+    axis.text.x = element_text(
+      angle = 90, hjust = 1, vjust = 0.5, colour = "black", size = 10
+    ),
+    axis.text.y = element_text(colour = "black", size = 10),
+    panel.grid = element_blank()
+  )
+
+p <- wrap_plots(
+  plot_spacer(), p_dendro,
+  plot_spacer(), p_top,
+  p_left, p_heat,
+  ncol = 2,
+  widths = c(0.04, 1),
+  heights = c(0.2, 0.04, 1),
+  guides = "collect"
+)
+
+print(p); if (params$export_fig) save_figure(p)
+```
+
+:::
 
 ## Descriptive statistics
 
 This section presents numbers without any interpretation of the results. @tbl-summarytable shows the main results.
 
 ```{r tbl-summarytable}
-#| tbl-cap: !expr paste0("Differentially expressed genes (padj < ", Q_CUT, ") per group, each compared with ", ref, ". ↑ up-regulated, ↓ down-regulated. Tested counts genes with an adjusted p-value, after DESeq2's independent filtering; for Any group it is the number of genes after the gene filter. Unique genes are significant in that group only; shared genes in at least one other group too, in either direction.")
+#| tbl-cap: !expr paste0("Differentially expressed genes (padj < ", Q_CUT, ", lfc > ", LFC, ") per group, each compared with ", ref, ". ↑ up-regulated, ↓ down-regulated. Tested counts genes with an adjusted p-value, after DESeq2's independent filtering; for Any group it is the number of genes after the gene filter. Unique genes are significant in that group only; shared genes in at least one other group too, in either direction.")
 
 per_group <- lapply(contrasts, function(x) {
   s <- res[res$contrast == x, ]
@@ -424,7 +561,198 @@ rbind(
 
 ### Differentially expressed genes
 
-Of the `r comma(n_genes)` genes that passed the gene filter, `r enum(count_text())` passed the significance threshold (padj < `r Q_CUT`). In total, **`r comma(n_union)` unique DEGs** were found in at least one group.
+Of the `r comma(n_genes)` tested genes that passed the gene filter, `r enum(count_text())` passed the significance threshold (padj < `r Q_CUT`, lfc > `r LFC`). In total, **`r comma(n_union)` distinct DEGs** were found in at least one group.
+
+```{r annot-pie-functions}
+# Gene annotation column shown in the pies, e.g. "gene_type" or "chr"
+var <- "gene_type2"
+
+# Classes with their own colour; the rest are pooled as "other", so every
+# slice has a colour and the legend stays short
+PIE_MAX_CLASSES <- 6
+
+has_annot_var <- exists("anno") && !is.null(anno) && var %in% names(anno)
+
+# Annotation class per gene; genes missing from the annotation are "unknown"
+anno_class <- function(ids, var) {
+  strip <- function(x) sub("^(ENS[A-Z]*G[0-9]+)\\.[0-9]+$", "\\1", x)
+  cls <- anno[[var]][match(strip(ids), strip(anno$gene_id))]
+  ifelse(has_ann(cls), as.character(cls), "unknown")
+}
+
+# Significant genes per pie column: one set per group, and the genes in
+# common. Common, both directions: significant in every group. Common,
+# split: counted once, and only when the direction is the same everywhere
+pie_genes <- function() {
+  groups <- lapply(contrasts, function(x) {
+    sig[sig$contrast == x, c("gene_id", "direction")]
+  })
+  names(groups) <- unname(group_lab[contrasts])
+
+  same <- ids_all[same_dir[ids_all]]
+  com <- sig[sig$gene_id %in% same, c("gene_id", "direction")]
+
+  list(
+    groups = groups,
+    com_all = data.frame(gene_id = ids_all, direction = rep("Both", n_all)),
+    com = com[!duplicated(com$gene_id), ]
+  )
+}
+
+# Genes per annotation class in one pie column, per direction or combined
+build_counts <- function(genes, var, set, by_dir = TRUE) {
+  if (nrow(genes) == 0) return(NULL)
+
+  data.frame(
+    set = set,
+    direction = if (by_dir) genes$direction else "Both",
+    class = anno_class(genes$gene_id, var)
+  ) |>
+    count(set, direction, class, name = "n")
+}
+
+# Percentages within each pie, and its total for the "n =" label
+prep_pies <- function(d, dir_lvl) {
+  d |>
+    group_by(set, direction) |>
+    mutate(total = sum(n), pct = 100 * n / total) |>
+    ungroup() |>
+    mutate(
+      set = factor(set, levels = c(unname(group_lab[contrasts]), "Common")),
+      direction = factor(direction, levels = dir_lvl),
+      label = ifelse(pct >= 8, sprintf("%.0f%%", pct), "")
+    )
+}
+
+pie_dir_lab <- c(
+  Both = "Both",
+  Up = "↑ Up",
+  Down = "↓ Down"
+)
+
+# One pie per column (set) and row (direction); slices under 8 % unlabelled
+plot_pies <- function(d, var, fill_scale) {
+  totals <- distinct(d, set, direction, total)
+
+  ggplot(d, aes(x = 1, y = pct, fill = class, group = class)) +
+    geom_col(width = 1, colour = "white", linewidth = 0.3) +
+    geom_text(
+      aes(label = label),
+      position = position_stack(vjust = 0.5),
+      size = 3
+    ) +
+    geom_text(
+      data = totals,
+      aes(x = 1.62, y = 0, label = paste("n =", comma(total))),
+      inherit.aes = FALSE,
+      size = 3.2
+    ) +
+    coord_polar(theta = "y") +
+    scale_x_continuous(limits = c(0.5, 1.68)) +
+    fill_scale +
+    facet_grid(
+      direction ~ set,
+      drop = FALSE,
+      labeller = labeller(direction = pie_dir_lab)
+    ) +
+    theme_void(base_size = 11) +
+    theme(
+      strip.text = element_text(face = "bold", margin = margin(2, 2, 2, 2)),
+      panel.spacing = unit(2, "pt")
+    )
+}
+
+# thin line between (A) and (B)
+divider <- ggplot() +
+  geom_hline(yintercept = 0, colour = "grey70") +
+  theme_void()
+
+# Classes outside `keep` become "other"; counts are summed again
+lump_classes <- function(d, keep) {
+  d |>
+    mutate(class = ifelse(class %in% c(keep, "unknown"), class, "other")) |>
+    count(set, direction, class, wt = n, name = "n")
+}
+
+# Set2 colours for the kept classes; greys for "other" and "unknown"
+pie_colours <- function(lv, palette) {
+  keep <- setdiff(lv, c("other", "unknown"))
+  cols <- c(
+    setNames(scales::brewer_pal(palette = palette)(8)[seq_along(keep)], keep),
+    other = "#a6a6a6",
+    unknown = "#dcdcdc"
+  )
+  cols[lv]
+}
+
+# full figure: (A) directions combined, (B) split by direction
+pie_figure <- function(var, palette = "Set2", name = "Gene type") {
+  s <- pie_genes()
+  sets <- names(s$groups)
+
+  both <- rbind(
+    do.call(rbind, lapply(sets, function(x) {
+      build_counts(s$groups[[x]], var, x, by_dir = FALSE)
+    })),
+    build_counts(s$com_all, var, "Common", by_dir = FALSE)
+  )
+  split <- rbind(
+    do.call(rbind, lapply(sets, function(x) {
+      build_counts(s$groups[[x]], var, x)
+    })),
+    build_counts(s$com, var, "Common")
+  )
+
+  # the PIE_MAX_CLASSES largest classes over all pies keep their own
+  # colour, from most to fewest genes; then "other" and "unknown", each only
+  # when some pie has it, so absent ones stay out of the legend
+  by_size <- both |>
+    count(class, wt = n) |>
+    arrange(desc(n)) |>
+    pull(class)
+  keep <- head(setdiff(by_size, "unknown"), PIE_MAX_CLASSES)
+  both <- lump_classes(both, keep)
+  split <- lump_classes(split, keep)
+
+  lv <- c(keep, intersect(c("other", "unknown"), c(both$class, split$class)))
+  both$class <- factor(both$class, levels = lv)
+  split$class <- factor(split$class, levels = lv)
+
+  fill_scale <- scale_fill_manual(
+    values = pie_colours(lv, palette),
+    name = name,
+    drop = FALSE,
+    guide = guide_legend(nrow = 2, byrow = TRUE)
+  )
+
+  both <- prep_pies(both, dir_lvl = "Both")
+  split <- prep_pies(split, dir_lvl = c("Up", "Down"))
+
+  p1 <- plot_pies(both, var, fill_scale) +
+    theme(strip.text.y = element_blank())
+  p2 <- plot_pies(split, var, fill_scale) +
+    theme(strip.text.x = element_blank())
+
+  (p1 / divider / p2) +
+    plot_layout(heights = c(1, 0.05, 2), guides = "collect") +
+    plot_annotation(tag_levels = list(c("A", "", "B"))) &
+    theme(legend.position = "bottom")
+}
+```
+
+`r if (has_annot_var) "@fig-annot-pies shows the gene types of the DEGs, from the Ensembl annotation." else ""`
+
+```{r fig-annot-pies}
+#| eval: !expr has_annot_var
+#| fig-cap: !expr paste0("Gene types of the DEGs (padj < ", Q_CUT, "), by group and for the DEGs in common (columns), compared with ", ref, ". (A) Both directions combined; common DEGs are those significant in all groups. (B) Split by direction (rows); common DEGs are counted once, and only when they change in the same direction in all groups. Gene types are from the Ensembl annotation; types outside the ", PIE_MAX_CLASSES, " largest are pooled as other. Percentages are within each pie, and _n_ above each pie is its total.")
+#| fig-width: 12
+#| fig-height: 9
+#| column: page-right
+
+p <- pie_figure(var, palette = "Set2", name = "Gene type")
+
+print(p); if (params$export_fig) save_figure(p)
+```
 
 `r comma(length(ids_unique))` DEGs (`r pct(length(ids_unique), n_union)` %) were significant in one group only: `r enum(count_text(ids_unique))`. `r comma(n_shared)` DEGs (`r pct(n_shared, n_union)` %) were shared by at least two groups, and of these `r comma(n_shared_same)` (`r pct(n_shared_same, n_shared)` %) changed in the same direction in every group they were significant in. `r comma(n_all)` DEGs were significant in all `r length(contrasts)` groups, `r comma(n_all_same)` of them in the same direction (@fig-venn, @tbl-intersections).
 
@@ -493,7 +821,7 @@ count_combos <- function(sets) {
 
 ```{r fig-venn}
 #| eval: !expr length(contrasts) %in% 2:4
-#| fig-cap: !expr paste0("Differentially expressed genes (padj < ", Q_CUT, ") shared between groups, each compared with ", ref, ". (A) Both directions combined. (B) Up-regulated genes. (C) Down-regulated genes. A gene that is up in one group and down in another is shared in (A), but counted once in (B) and once in (C).")
+#| fig-cap: !expr paste0("Differentially expressed genes (padj < ", Q_CUT, ", lfc > ", LFC, ") shared between groups, each compared with ", ref, ". (A) Both directions combined. (B) Up-regulated genes. (C) Down-regulated genes. A gene that is up in one group and down in another is shared in (A), but counted once in (B) and once in (C).")
 #| fig-width: 10
 #| fig-height: 11
 
@@ -549,7 +877,7 @@ cat("No gene was significant in all", length(contrasts), "groups.\n")
 
 ```{r tbl-shared-all}
 #| eval: !expr n_all > 0
-#| tbl-cap: !expr paste0("Genes significant (padj < ", Q_CUT, ") in all ", length(contrasts), " groups, sorted by the largest adjusted p-value across the groups", if (n_all > TOP_N) paste0("; the ", TOP_N, " of ", comma(n_all), " genes with the smallest are shown") else "", ". Group columns show the apeglm-shrunken log2 fold change against ", ref, ".")
+#| tbl-cap: !expr paste0("Genes significant (padj < ", Q_CUT, " lfc > ", LFC, ") in all ", length(contrasts), " groups, sorted by the largest adjusted p-value across the groups", if (n_all > TOP_N) paste0("; the ", TOP_N, " of ", comma(n_all), " genes with the smallest are shown") else "", ". Group columns show the apeglm-shrunken log2 fold change against ", ref, ".")
 #| column: page-right
 
 sig |>
@@ -566,7 +894,11 @@ sig |>
   arrange(max_padj) |>
   head(TOP_N) |>
   mutate(
-    Gene = paste0("*", gene_label(gene_id), "*"),
+    Gene = sprintf(
+      "[*%s*](https://www.ncbi.nlm.nih.gov/gene/?term=%s)",
+      gene_label(gene_id),
+      gene_id
+    ),
     max_padj = signif(max_padj, 3)
   ) |>
   select(
@@ -1040,6 +1372,397 @@ for (x in contrasts) {
   cat("\n#### ", group_lab[[x]], "\n")
   enrichment_tabs(x)
 }
+```
+
+### Genes behind the GO terms
+
+The ORA tables and figures above look at the enriched terms one by one. This section turns the same results around and starts from the genes. Enriched terms often share most of their genes, also across the three ontologies, so several terms can be one signal counted more than once. Genes that are part of many enriched terms are the ones driving the GO results. Only the up- and down-regulated tests are used, so a gene counts once per group.
+
+```{r gene-view-data}
+# Databases in the gene view; add "KEGG" and "Reactome" to include them
+GENE_VIEW_DBS <- c("GO_BP", "GO_MF", "GO_CC")
+
+# genes in the kable, terms listed per gene in the lookup table, and terms
+# and genes per heat map
+GENE_VIEW_TOP <- 15
+GENE_VIEW_MAX_TERMS <- 15
+HEAT_TERMS <- 15
+HEAT_GENES <- 40
+
+# GO themes from go_themes.R when the report has them, NA otherwise; the
+# ORA table `terms` itself is left as it is
+gene_view_src <- if ("theme_id" %in% names(terms)) {
+  terms
+} else {
+  mutate(terms, theme_id = NA_character_)
+}
+gene_view_themes <- any(!is.na(gene_view_src$theme_id))
+
+# One row per gene and enriched term, from the up- and down-regulated tests
+gene_long <- gene_view_src |>
+  filter(
+    as.character(database) %in% GENE_VIEW_DBS,
+    direction %in% c("Up", "Down")
+  ) |>
+  select(
+    contrast, direction, database, ID, Description, p.adjust, theme_id,
+    gene_id, gene_name
+  ) |>
+  unnest(cols = c(gene_id, gene_name)) |>
+  mutate(
+    contrast = as.character(contrast),
+    direction = as.character(direction),
+    term_key = paste(database, ID)
+  )
+
+has_gene_view <- nrow(gene_long) > 0
+
+# Shrunken log2 fold change per gene, one named vector per group
+lfc_all <- lapply(setNames(contrasts, contrasts), lfc_lookup)
+
+# One row per gene: enriched GO terms and themes over all groups
+gene_summary <- gene_long |>
+  group_by(gene_id) |>
+  summarise(
+    gene_name = first(gene_name),
+    n_terms = n_distinct(term_key),
+    n_themes = n_distinct(theme_id[!is.na(theme_id)]),
+    n_groups = n_distinct(contrast),
+    .groups = "drop"
+  ) |>
+  arrange(desc(n_terms), desc(n_groups))
+
+# One row per gene and group: enriched GO terms, direction and log2FC
+gene_group <- gene_long |>
+  group_by(gene_id, contrast) |>
+  summarise(
+    n = n_distinct(term_key),
+    dir = first(direction),
+    .groups = "drop"
+  ) |>
+  mutate(
+    lfc = unname(mapply(
+      function(g, x) unname(lfc_all[[x]][g]),
+      gene_id,
+      contrast
+    ))
+  )
+
+# The terms of each gene as text: terms enriched in the most groups first,
+# at most GENE_VIEW_MAX_TERMS
+gene_terms_text <- gene_long |>
+  group_by(gene_id, term_key, Description, database) |>
+  summarise(
+    n_groups = n_distinct(contrast),
+    best = min(p.adjust),
+    .groups = "drop"
+  ) |>
+  arrange(gene_id, desc(n_groups), best) |>
+  mutate(
+    lab = sprintf(
+      "%s (%s)",
+      Description,
+      db_short[as.character(database)]
+    )
+  ) |>
+  group_by(gene_id) |>
+  summarise(
+    terms = paste0(
+      paste(head(lab, GENE_VIEW_MAX_TERMS), collapse = "; "),
+      if (n() > GENE_VIEW_MAX_TERMS) {
+        sprintf("; +%d more", n() - GENE_VIEW_MAX_TERMS)
+      } else {
+        ""
+      }
+    ),
+    .groups = "drop"
+  )
+
+gene_view_text <- if (has_gene_view) {
+  top <- gene_summary[1, ]
+  paste0(
+    "In total, ", comma(nrow(gene_summary)), " genes were part of at least ",
+    "one enriched GO term in at least one group. ",
+    comma(sum(gene_summary$n_terms >= 10)), " genes were in 10 or more ",
+    "terms, and the gene in the most terms was *", top$gene_name, "*, with ",
+    top$n_terms, " terms in ", top$n_groups, " group",
+    if (top$n_groups > 1) "s" else "", " (@tbl-gene-terms)."
+  )
+} else {
+  "No GO term was enriched among the up- or down-regulated genes."
+}
+```
+
+`r gene_view_text`
+
+```{r tbl-gene-terms}
+#| eval: !expr has_gene_view
+#| tbl-cap: !expr paste0("The ", GENE_VIEW_TOP, " genes in the most enriched GO terms, over all groups. GO terms counts each term once, whichever group it is enriched in", if (gene_view_themes) ", and GO themes the themes those terms belong to" else "", ". The group columns show the number of enriched GO terms the gene is part of in that group, and whether the gene is ↑ up- or ↓ down-regulated there.")
+
+# "12 ↑" per gene and group
+per_group <- gene_group |>
+  mutate(
+    arrow = ifelse(dir == "Up", "↑", "↓"),
+    cell = sprintf("%d %s", n, arrow)
+  ) |>
+  select(gene_id, contrast, cell) |>
+  pivot_wider(names_from = contrast, values_from = cell, values_fill = "")
+
+for (x in setdiff(contrasts, names(per_group))) per_group[[x]] <- ""
+
+tbl <- gene_summary |>
+  head(GENE_VIEW_TOP) |>
+  left_join(per_group, by = "gene_id") |>
+  mutate(Gene = paste0("*", gene_name, "*")) |>
+  select(
+    Gene,
+    `Ensembl ID` = gene_id,
+    `GO terms` = n_terms,
+    `GO themes` = n_themes,
+    all_of(contrasts)
+  )
+
+if (!gene_view_themes) tbl$`GO themes` <- NULL
+names(tbl)[names(tbl) %in% contrasts] <- unname(
+  group_lab[names(tbl)[names(tbl) %in% contrasts]]
+)
+
+knitr::kable(
+  tbl,
+  align = paste0("ll", strrep("r", ncol(tbl) - 2)),
+  row.names = FALSE
+)
+```
+
+#### Gene lookup
+
+::: {.callout-tip title="Interactive table"}
+One row per gene that is part of at least one enriched GO term. Type a gene name in the filter box of the Gene column to see every GO term it contributes to. The group columns show how many enriched GO terms the gene is part of in that group, with an arrow for its direction; the tooltip shows its shrunken log~2~ fold change. The last column lists the gene's terms, those enriched in the most groups first, at most `r GENE_VIEW_MAX_TERMS`.
+:::
+
+```{r gene-lookup-table}
+#| eval: !expr has_gene_view
+#| column: page
+
+lookup <- gene_summary |>
+  left_join(gene_terms_text, by = "gene_id")
+
+for (x in contrasts) {
+  g <- gene_group[gene_group$contrast == x, ]
+  i <- match(lookup$gene_id, g$gene_id)
+  lookup[[paste0("n_", x)]] <- g$n[i]
+  lookup[[paste0("d_", x)]] <- ifelse(g$dir[i] == "Up", "↑", "↓")
+  lookup[[paste0("l_", x)]] <- round(g$lfc[i], 2)
+}
+
+# Gene symbol as a link to its NCBI gene page, built in the browser
+gene_cell <- JS(
+  "function(cellInfo) {
+    return '<a href=\"https://www.ncbi.nlm.nih.gov/gene/?term=' +
+      cellInfo.row['gene_id'] +
+      '\" target=\"_blank\" rel=\"noopener\"><i>' + cellInfo.value +
+      '</i></a>';
+  }"
+)
+
+# "12 ↑" in the colour of the direction, with log2FC as the tooltip
+group_cell <- function(x) {
+  JS(sprintf(
+    "function(cellInfo) {
+      if (cellInfo.value == null) return '';
+      var d = cellInfo.row['d_%1$s'];
+      var col = d === '↑' ? '%2$s' : '%3$s';
+      return '<span style=\"color:' + col + ';\" title=\"log2FC: ' +
+        cellInfo.row['l_%1$s'] + '\">' + cellInfo.value + ' ' + d +
+        '</span>';
+    }",
+    x,
+    dir_colours[["Up"]],
+    dir_colours[["Down"]]
+  ))
+}
+
+group_cols <- lapply(contrasts, function(x) {
+  colDef(
+    name = group_lab[[x]],
+    cell = group_cell(x),
+    html = TRUE,
+    maxWidth = 110,
+    filterable = FALSE,
+    sortNALast = TRUE
+  )
+})
+names(group_cols) <- paste0("n_", contrasts)
+
+hidden_cols <- c("gene_id", paste0("d_", contrasts), paste0("l_", contrasts))
+hidden <- lapply(hidden_cols, function(col) colDef(show = FALSE))
+names(hidden) <- hidden_cols
+
+cols <- c(
+  "gene_name", "n_terms", "n_themes", "n_groups",
+  paste0("n_", contrasts), "terms", hidden_cols
+)
+
+reactable(
+  as.data.frame(lookup[, cols]),
+  columns = c(
+    list(
+      gene_name = colDef(
+        name = "Gene",
+        cell = gene_cell,
+        html = TRUE,
+        minWidth = 100
+      ),
+      n_terms = colDef(name = "GO terms", maxWidth = 90, filterable = FALSE),
+      n_themes = colDef(
+        name = "GO themes",
+        maxWidth = 100,
+        filterable = FALSE,
+        show = gene_view_themes
+      ),
+      n_groups = colDef(name = "Groups", maxWidth = 80, filterable = FALSE),
+      terms = colDef(
+        name = "Enriched GO terms",
+        minWidth = 380,
+        style = list(whiteSpace = "normal", fontSize = "0.85em")
+      )
+    ),
+    group_cols,
+    hidden
+  ),
+  filterable = TRUE,
+  defaultSorted = list(n_terms = "desc"),
+  defaultPageSize = 15,
+  striped = TRUE,
+  highlight = TRUE,
+  compact = TRUE,
+  theme = reactableTheme(cellPadding = "4px 6px")
+)
+```
+
+#### Genes × terms
+
+The heat maps show, per group, the `r HEAT_TERMS` GO terms with the smallest adjusted p-value among the up- (top) and down-regulated (bottom) genes, and the `r HEAT_GENES` genes that are part of the most of these terms. A coloured cell means the gene is part of the term, coloured by its shrunken log~2~ fold change; an empty cell means it is not. Terms and genes are ordered by clustering on shared genes, so terms built from the same genes sit next to each other: a block of near-identical rows is one signal, however many terms it shows up in. The label ends with the term's `r if (gene_view_themes) "GO theme" else "ontology"`.
+
+```{r gene-heatmap-functions}
+#| eval: !expr has_gene_view
+
+# Order of the rows of a 0/1 matrix by clustering on shared columns
+cluster_order <- function(mat) {
+  if (nrow(mat) < 3) return(rownames(mat))
+  rownames(mat)[hclust(dist(mat, method = "binary"))$order]
+}
+
+# Gene × term table of one group and direction: the HEAT_TERMS terms with
+# the smallest padj and the HEAT_GENES genes that are in the most of them
+heat_data <- function(x, dir) {
+  d <- gene_long[gene_long$contrast == x & gene_long$direction == dir, ]
+  if (nrow(d) == 0) return(d)
+
+  top_terms <- d |>
+    distinct(term_key, p.adjust) |>
+    slice_min(p.adjust, n = HEAT_TERMS, with_ties = FALSE)
+  d <- d[d$term_key %in% top_terms$term_key, ]
+
+  lfc <- lfc_all[[x]]
+  top_genes <- d |>
+    count(gene_id, name = "n") |>
+    mutate(abs_lfc = abs(unname(lfc[gene_id]))) |>
+    arrange(desc(n), desc(abs_lfc)) |>
+    head(HEAT_GENES)
+  d <- d[d$gene_id %in% top_genes$gene_id, ]
+
+  tag <- ifelse(
+    is.na(d$theme_id),
+    unname(db_short[as.character(d$database)]),
+    d$theme_id
+  )
+  d$lfc <- unname(lfc[d$gene_id])
+  d$term_lab <- paste0(wrap_text(d$Description, 45), "  [", tag, "]")
+
+  # 1 where the gene is part of the term, 0 where not
+  m <- 1 * (unclass(table(d$term_lab, d$gene_id)) > 0)
+  d$term_lab <- factor(d$term_lab, levels = cluster_order(m))
+  d$gene_id <- factor(d$gene_id, levels = cluster_order(t(m)))
+  d
+}
+
+plot_heat <- function(d, dir, lim) {
+  if (nrow(d) == 0) {
+    return(
+      ggplot() +
+        annotate(
+          "text",
+          x = 0,
+          y = 0,
+          label = "No enriched GO terms",
+          colour = "grey40"
+        ) +
+        labs(title = dir_lab[[dir]]) +
+        theme_void() +
+        theme(plot.title = element_text(face = "bold"))
+    )
+  }
+
+  gene_lab <- setNames(d$gene_name, as.character(d$gene_id))
+  gene_lab <- gene_lab[!duplicated(names(gene_lab))]
+
+  ggplot(d, aes(gene_id, term_lab, fill = lfc)) +
+    geom_tile(colour = "white", linewidth = 0.5) +
+    scale_x_discrete(labels = gene_lab) +
+    # diverging: blue down, grey 0, red up, symmetric around 0
+    scale_fill_gradient2(
+      low = dir_colours[["Down"]],
+      mid = "#f2f2f2",
+      high = dir_colours[["Up"]],
+      midpoint = 0,
+      limits = c(-lim, lim),
+      name = "Shrunken\nlog2FC"
+    ) +
+    labs(x = NULL, y = NULL, title = dir_lab[[dir]]) +
+    theme_minimal(base_size = 10) +
+    theme(
+      axis.text.x = element_text(
+        angle = 90,
+        hjust = 1,
+        vjust = 0.5,
+        face = "italic"
+      ),
+      panel.grid = element_blank(),
+      plot.title = element_text(face = "bold")
+    )
+}
+
+# Up above Down, one colour scale for both
+plot_heat_group <- function(x) {
+  d_up <- heat_data(x, "Up")
+  d_down <- heat_data(x, "Down")
+
+  lim <- suppressWarnings(max(abs(c(d_up$lfc, d_down$lfc)), na.rm = TRUE))
+  if (!is.finite(lim)) lim <- 1
+
+  (plot_heat(d_up, "Up", lim) / plot_heat(d_down, "Down", lim)) +
+    plot_layout(guides = "collect")
+}
+```
+
+```{r gene-heatmaps}
+#| eval: !expr has_gene_view
+#| output: asis
+#| fig-width: 12
+#| fig-height: 12
+
+cat("\n::: {.panel-tabset .column-page-right}\n")
+for (x in contrasts) {
+  cat("\n##### ", group_lab[[x]], "\n\n")
+  p <- plot_heat_group(x)
+  print(p)
+  if (params$export_fig) {
+    save_figure(p, name = paste0("fig-gene-heatmap-", x))
+  }
+  cat("\n")
+}
+cat("\n:::\n")
 ```
 
 ## Gene set enrichment analysis
