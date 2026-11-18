@@ -12,6 +12,7 @@ params:
   enrichment_dir: "analysis/pathway_enrichment"
   # adjusted p-value cut-off; 0 = use the alpha from DESEQ2_RESULTS
   alpha: 0
+  lfc: 0
   export_fig: false
 ---
 
@@ -153,6 +154,7 @@ lvl_map <- setNames(vapply(enr_contrasts, match_level, ""), enr_contrasts)
 ```{r parameters}
 # adjusted p-value, the same as in DESEQ2_RESULTS unless set in params
 Q_CUT <- if (params$alpha > 0) params$alpha else summ$alpha[1]
+LFC <- if (params$lfc > 0) params$lfc else 0
 
 # genes listed in the "shared by all groups" table
 TOP_N <- 50
@@ -378,7 +380,7 @@ p <- ggplot(
   geom_text_repel(
     aes(label = sample),
     size = 3,
-    colour = "grey30",
+    colour = "black",
     max.overlaps = Inf,
     seed = 1337
   ) +
@@ -388,7 +390,7 @@ p <- ggplot(
     x = sprintf("PC1 (%.1f%%)", pct_var[1]),
     y = sprintf("PC2 (%.1f%%)", pct_var[2])
   ) +
-  theme_bw(base_size = 12) +
+  theme_bw(base_size = 13) +
   theme(legend.position = "bottom")
 
 print(p); if (params$export_fig) save_figure(p)
@@ -467,14 +469,12 @@ p_top <- ggplot(
   aes(factor(sample, levels = samples), 1, fill = group)
 ) +
   geom_tile(colour = "black", linewidth = 0.3) +
-  scale_fill_manual(values = group_colours, labels = lab_fun, name = NULL) +
+  scale_fill_manual(values = group_colours, labels = lab_fun, name = "Groups") +
   scale_x_discrete(expand = c(0, 0)) +
-  theme_void()
+  theme_void(base_size = 13)
 
-p_left <- ggplot(
-  strip_df,
-  aes(1, factor(sample, levels = rev(samples)), fill = group)
-) +
+p_left <- ggplot(strip_df,
+    aes(1, factor(sample, levels = rev(samples)), fill = group)) +
   geom_tile(colour = "black", linewidth = 0.3) +
   scale_fill_manual(values = group_colours, guide = "none") +
   scale_y_discrete(expand = c(0, 0)) +
@@ -491,9 +491,12 @@ p_heat <- ggplot(dist_df, aes(x, y, fill = dist)) +
   scale_x_discrete(expand = c(0, 0)) +
   scale_y_discrete(position = "right", expand = c(0, 0)) +
   labs(x = NULL, y = NULL) +
-  theme_minimal(base_size = 13) +
+  theme_bw(base_size = 13) +
   theme(
-    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+    axis.text.x = element_text(
+      angle = 90, hjust = 1, vjust = 0.5, colour = "black", size = 9
+    ),
+    axis.text.y = element_text(colour = "black", size = 9),
     panel.grid = element_blank()
   )
 
@@ -517,7 +520,7 @@ print(p); if (params$export_fig) save_figure(p)
 This section presents numbers without any interpretation of the results. @tbl-summarytable shows the main results.
 
 ```{r tbl-summarytable}
-#| tbl-cap: !expr paste0("Differentially expressed genes (padj < ", Q_CUT, ") per group, each compared with ", ref, ". ↑ up-regulated, ↓ down-regulated. Tested counts genes with an adjusted p-value, after DESeq2's independent filtering; for Any group it is the number of genes after the gene filter. Unique genes are significant in that group only; shared genes in at least one other group too, in either direction.")
+#| tbl-cap: !expr paste0("Differentially expressed genes (padj < ", Q_CUT, ", lfc > ", LFC, ") per group, each compared with ", ref, ". ↑ up-regulated, ↓ down-regulated. Tested counts genes with an adjusted p-value, after DESeq2's independent filtering; for Any group it is the number of genes after the gene filter. Unique genes are significant in that group only; shared genes in at least one other group too, in either direction.")
 
 per_group <- lapply(contrasts, function(x) {
   s <- res[res$contrast == x, ]
@@ -548,7 +551,7 @@ rbind(
 
 ### Differentially expressed genes
 
-Of the `r comma(n_genes)` genes that passed the gene filter, `r enum(count_text())` passed the significance threshold (padj < `r Q_CUT`). In total, **`r comma(n_union)` unique DEGs** were found in at least one group.
+Of the `r comma(n_genes)` genes that passed the gene filter, `r enum(count_text())` passed the significance threshold (padj < `r Q_CUT`, lfc > `r LFC`). In total, **`r comma(n_union)` unique DEGs** were found in at least one group.
 
 `r comma(length(ids_unique))` DEGs (`r pct(length(ids_unique), n_union)` %) were significant in one group only: `r enum(count_text(ids_unique))`. `r comma(n_shared)` DEGs (`r pct(n_shared, n_union)` %) were shared by at least two groups, and of these `r comma(n_shared_same)` (`r pct(n_shared_same, n_shared)` %) changed in the same direction in every group they were significant in. `r comma(n_all)` DEGs were significant in all `r length(contrasts)` groups, `r comma(n_all_same)` of them in the same direction (@fig-venn, @tbl-intersections).
 
@@ -617,7 +620,7 @@ count_combos <- function(sets) {
 
 ```{r fig-venn}
 #| eval: !expr length(contrasts) %in% 2:4
-#| fig-cap: !expr paste0("Differentially expressed genes (padj < ", Q_CUT, ") shared between groups, each compared with ", ref, ". (A) Both directions combined. (B) Up-regulated genes. (C) Down-regulated genes. A gene that is up in one group and down in another is shared in (A), but counted once in (B) and once in (C).")
+#| fig-cap: !expr paste0("Differentially expressed genes (padj < ", Q_CUT, ", lfc > ", LFC, ") shared between groups, each compared with ", ref, ". (A) Both directions combined. (B) Up-regulated genes. (C) Down-regulated genes. A gene that is up in one group and down in another is shared in (A), but counted once in (B) and once in (C).")
 #| fig-width: 10
 #| fig-height: 11
 
@@ -673,7 +676,7 @@ cat("No gene was significant in all", length(contrasts), "groups.\n")
 
 ```{r tbl-shared-all}
 #| eval: !expr n_all > 0
-#| tbl-cap: !expr paste0("Genes significant (padj < ", Q_CUT, ") in all ", length(contrasts), " groups, sorted by the largest adjusted p-value across the groups", if (n_all > TOP_N) paste0("; the ", TOP_N, " of ", comma(n_all), " genes with the smallest are shown") else "", ". Group columns show the apeglm-shrunken log2 fold change against ", ref, ".")
+#| tbl-cap: !expr paste0("Genes significant (padj < ", Q_CUT, " lfc > ", LFC, ") in all ", length(contrasts), " groups, sorted by the largest adjusted p-value across the groups", if (n_all > TOP_N) paste0("; the ", TOP_N, " of ", comma(n_all), " genes with the smallest are shown") else "", ". Group columns show the apeglm-shrunken log2 fold change against ", ref, ".")
 #| column: page-right
 
 sig |>
